@@ -5,13 +5,18 @@ A Flask-based web application for detecting defects using AI models.
 
 import os
 from flask import Flask, jsonify
-from config import config
+import config
 
 app = Flask(__name__)
 
 # Load configuration based on environment
 env = os.environ.get('FLASK_ENV', 'development')
-app.config.from_object(config.get(env, config['default']))
+# Support both a `config` dict (mapping env->obj) or the config module itself
+if isinstance(config, dict):
+    cfg = config.get(env, config.get('default', config))
+else:
+    cfg = config
+app.config.from_object(cfg)
 
 
 @app.route('/')

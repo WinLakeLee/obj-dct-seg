@@ -405,3 +405,6 @@ $RECYCLE.BIN/
 
 # numpy files
 .npy
+/outputs
+/data/archive
+/.venv-deeplearning

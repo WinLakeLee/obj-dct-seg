@@ -2,7 +2,7 @@
 Setup script for 404-AI project
 """
 
-from setuptools import setup, find_packages
+from setuptools import setup
 
 with open('README.md', 'r', encoding='utf-8') as f:
     long_description = f.read()
@@ -17,7 +17,7 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     author='WinLakeLee',
-    packages=find_packages(),
+    py_modules=['app', 'config', 'example'],
     install_requires=requirements,
     python_requires='>=3.8',
     classifiers=[

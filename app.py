@@ -20,15 +20,44 @@ def index():
 @app.route('/health')
 def health():
     """Health check endpoint"""
+    dependencies = {}
+    
+    # Check if dependencies can be imported
+    try:
+        import flask
+        dependencies['flask'] = 'installed'
+    except ImportError:
+        dependencies['flask'] = 'not installed'
+    
+    try:
+        import cv2
+        dependencies['opencv'] = 'installed'
+    except ImportError:
+        dependencies['opencv'] = 'not installed'
+    
+    try:
+        import tensorflow
+        dependencies['tensorflow'] = 'installed'
+    except ImportError:
+        dependencies['tensorflow'] = 'not installed'
+    
+    try:
+        import ultralytics
+        dependencies['ultralytics'] = 'installed'
+    except ImportError:
+        dependencies['ultralytics'] = 'not installed'
+    
+    try:
+        import sam2
+        dependencies['sam2'] = 'installed'
+    except ImportError:
+        dependencies['sam2'] = 'not installed'
+    
+    all_installed = all(status == 'installed' for status in dependencies.values())
+    
     return jsonify({
-        'status': 'healthy',
-        'dependencies': {
-            'flask': 'installed',
-            'opencv': 'installed',
-            'tensorflow': 'installed',
-            'ultralytics': 'installed',
-            'sam2': 'installed'
-        }
+        'status': 'healthy' if all_installed else 'degraded',
+        'dependencies': dependencies
     })
 
 

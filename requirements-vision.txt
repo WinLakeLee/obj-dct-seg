@@ -1,0 +1,13 @@
+# Vision/optional extras — install separately if you need Ultralytics / SAM
+# These packages may require newer NumPy / different environment; install in separate venv if desired.
+
+# Ultralytics (YOLO) - typically requires opencv>=4.6
+ultralytics
+opencv-python>=4.6.0
+
+# SAM (Segment Anything) - may require numpy>=1.26 or numpy>=2.x depending on build
+# Install SAM in a separate environment if you use it
+sam3
+
+# Intel RealSense SDK for Python
+pyrealsense2>=2.50.0

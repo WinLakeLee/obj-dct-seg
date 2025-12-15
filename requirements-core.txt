@@ -1,0 +1,16 @@
+# Core requirements (TensorFlow 2.10 / CUDA 11.2 compatible)
+
+# Numerical
+numpy==1.23.5
+
+# Core runtime
+pillow>=8.0.0
+flask
+
+# TensorFlow (GPU-enabled). Ensure system CUDA/cuDNN matches TF 2.10 (CUDA 11.2)
+tensorflow==2.10.0
+tensorflow-estimator==2.10.0
+keras==2.10.0
+
+# Pin OpenCV to a 4.5.x build compatible with numpy 1.23
+opencv-python==4.5.5.64

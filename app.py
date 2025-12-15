@@ -59,10 +59,10 @@ def health():
         dependencies['ultralytics'] = 'not installed'
     
     try:
-        import sam2
-        dependencies['sam2'] = 'installed'
+        import sam3
+        dependencies['sam3'] = 'installed'
     except ImportError:
-        dependencies['sam2'] = 'not installed'
+        dependencies['sam3'] = 'not installed'
     
     all_installed = all(status == 'installed' for status in dependencies.values())
     

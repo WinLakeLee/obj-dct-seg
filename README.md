@@ -77,6 +77,20 @@ python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 ```
 
+Optional vision extras
+- Ultralytics, 최신 OpenCV, SAM 같은 비전 관련 패키지는 별도로 관리하는 것을 권장합니다.
+- 프로젝트에는 `requirements-vision.txt`가 있으며, 필요할 때만 설치하세요:
+
+```powershell
+# 같은 가상환경에 설치 (충돌 가능성 있음)
+python -m pip install -r requirements-vision.txt
+
+# 또는 별도 가상환경에서 설치(권장)
+py -3.10 -m venv .venv-vision
+.\.venv-vision\Scripts\Activate.ps1
+python -m pip install -r requirements-vision.txt
+```
+
 사용법
 - 애플리케이션 실행
 ```powershell

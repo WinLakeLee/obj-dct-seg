@@ -14,7 +14,7 @@ Factory defect detection system with AI-powered computer vision.
 - **OpenCV**: Computer vision and image processing
 - **TensorFlow**: Deep learning framework
 - **Ultralytics**: YOLO models for object detection
-- **SAM2**: Segment Anything Model for image segmentation
+- **SAM3**: Segment Anything Model for image segmentation
 
 ### Hardware
 - Intel RealSense Camera (D400 series recommended for depth sensing capabilities)

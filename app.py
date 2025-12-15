@@ -3,9 +3,15 @@
 A Flask-based web application for detecting defects using AI models.
 """
 
+import os
 from flask import Flask, jsonify
+from config import config
 
 app = Flask(__name__)
+
+# Load configuration based on environment
+env = os.environ.get('FLASK_ENV', 'development')
+app.config.from_object(config.get(env, config['default']))
 
 
 @app.route('/')
@@ -62,4 +68,9 @@ def health():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Get configuration from environment
+    debug = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 't')
+    host = os.environ.get('HOST', '0.0.0.0')
+    port = int(os.environ.get('PORT', 5000))
+    
+    app.run(debug=debug, host=host, port=port)

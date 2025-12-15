@@ -397,10 +397,11 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
+
+# End of https://www.toptal.com/developers/gitignore/api/python,venv,dotenv,windows,flask,opencv,visualstudiocode
+
 # XML files
 .xml
 
 # numpy files
 .npy
-
-# End of https://www.toptal.com/developers/gitignore/api/python,venv,dotenv,windows,flask,opencv,visualstudiocode

@@ -40,9 +40,9 @@ including Intel RealSense camera settings and other parameters.
 import os
 
 # RealSense Camera Configuration
-REALSENSE_WIDTH = int(os.getenv('REALSENSE_WIDTH', '640'))
-REALSENSE_HEIGHT = int(os.getenv('REALSENSE_HEIGHT', '480'))
-REALSENSE_FPS = int(os.getenv('REALSENSE_FPS', '30'))
+REALSENSE_WIDTH = max(1, int(os.getenv('REALSENSE_WIDTH', '640')))
+REALSENSE_HEIGHT = max(1, int(os.getenv('REALSENSE_HEIGHT', '480')))
+REALSENSE_FPS = max(1, min(120, int(os.getenv('REALSENSE_FPS', '30'))))
 
 # Optionally specify a device by serial number
 REALSENSE_DEVICE_SERIAL = os.getenv('REALSENSE_DEVICE_SERIAL', None)
@@ -52,8 +52,8 @@ REALSENSE_RECORD_ENABLED = os.getenv('REALSENSE_RECORD_ENABLED', 'False').lower(
 REALSENSE_RECORD_PATH = os.getenv('REALSENSE_RECORD_PATH', './recordings')
 
 # Depth settings
-REALSENSE_DEPTH_MIN = float(os.getenv('REALSENSE_DEPTH_MIN', '0.1'))  # meters
-REALSENSE_DEPTH_MAX = float(os.getenv('REALSENSE_DEPTH_MAX', '10.0'))  # meters
+REALSENSE_DEPTH_MIN = max(0.0, float(os.getenv('REALSENSE_DEPTH_MIN', '0.1')))  # meters
+REALSENSE_DEPTH_MAX = max(REALSENSE_DEPTH_MIN + 0.1, float(os.getenv('REALSENSE_DEPTH_MAX', '10.0')))  # meters
 
 # ============================================================================
 # Application Configuration

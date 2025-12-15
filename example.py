@@ -45,8 +45,7 @@ def main():
         depth_frame = frames.get_depth_frame()
         
         if not color_frame or not depth_frame:
-            print("Error: Could not get frames from camera")
-            return
+            raise RuntimeError("Could not get frames from camera")
         
         # Convert frames to numpy arrays
         color_image = np.asanyarray(color_frame.get_data())

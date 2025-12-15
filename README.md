@@ -10,6 +10,11 @@ Factory defect detection system with AI-powered computer vision.
 - **Flexible Configuration**: Easy-to-configure system for different manufacturing environments
 
 ## Dependencies
+- **Flask**: Web framework for building REST APIs
+- **OpenCV**: Computer vision and image processing
+- **TensorFlow**: Deep learning framework
+- **Ultralytics**: YOLO models for object detection
+- **SAM2**: Segment Anything Model for image segmentation
 
 ### Hardware
 - Intel RealSense Camera (D400 series recommended for depth sensing capabilities)
@@ -48,19 +53,29 @@ git clone https://github.com/WinLakeLee/404-ai.git
 cd 404-ai
 ```
 
-2. Install dependencies:
+2. Create a virtual environment (recommended):
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Configure the application:
+4. Configure the application:
    - Review `config.py` for Intel RealSense camera settings
    - Set up any necessary environment variables
 
 ## Usage
 
-Run the example script to test Intel RealSense camera integration:
+### Running the Flask Application
+```bash
+python app.py
+```
 
+Run the example script to test Intel RealSense camera integration:
 ```bash
 python example.py
 ```
@@ -75,25 +90,6 @@ Intel RealSense cameras provide depth sensing capabilities that enable:
 - **Enhanced accuracy**: Combine RGB and depth data for more reliable defect identification
 - **Multi-modal sensing**: Utilize color, depth, and infrared streams for comprehensive analysis
 
-## License
-
-2. Create a virtual environment (recommended):
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Running the Flask Application
-```bash
-python app.py
-```
 
 The server will start on `http://localhost:5000`
 

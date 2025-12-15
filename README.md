@@ -42,79 +42,77 @@ AI-powered system for detecting defects in factory production using computer vis
 
 ## Installation
 
-### Prerequisites
-- Python 3.8 or higher
-- pip package manager
+# 404-AI
 
-### Setup
-1. Clone the repository:
-```bash
+한국어 정리: 공장 불량 검출을 위한 AI 기반 컴퓨터 비전 시스템
+
+요약
+- `404-AI`는 Intel RealSense 카메라와 딥러닝 모델을 활용하여 공정 중 발생하는 불량을 실시간으로 감지하는 프로젝트입니다.
+
+주요 기능
+- AI 기반 불량 검출 (TensorFlow / Ultralytics 등)
+- Intel RealSense 카메라 연동(RGB + Depth)
+- 실시간 영상 처리 파이프라인
+- Flask 기반 간단한 REST API (`/`, `/health`)
+
+필수 조건
+- Python 3.8 또는 3.10 권장 (프로젝트에서 TensorFlow 2.10 호환을 위해 3.10 권장)
+- pip
+- Intel RealSense 하드웨어(선택)
+
+설치 (Windows 권장 예시)
+1. 저장소 클론
+```powershell
 git clone https://github.com/WinLakeLee/404-ai.git
 cd 404-ai
 ```
-
-2. Create a virtual environment (recommended):
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+2. Python 3.10 가상환경 생성 및 활성화
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+3. pip 도구 업그레이드 및 의존성 설치
+```powershell
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
 ```
 
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Configure the application:
-   - Review `config.py` for Intel RealSense camera settings
-   - Set up any necessary environment variables
-
-## Usage
-
-### Running the Flask Application
-```bash
+사용법
+- 애플리케이션 실행
+```powershell
 python app.py
 ```
-
-Run the example script to test Intel RealSense camera integration:
-```bash
+- 예제(RealSense 테스트)
+```powershell
 python example.py
 ```
 
-This will initialize the Intel RealSense camera, capture frames, and display frame dimensions.
+API
+- `GET /` — 환영 메시지
+- `GET /health` — 의존성 및 상태 확인
 
-## Intel RealSense Purpose
+구성
+- 주요 설정은 `config.py`에서 관리됩니다. (카메라 해상도, fps, 녹화 경로 등)
 
-Intel RealSense cameras provide depth sensing capabilities that enable:
-- **3D defect detection**: Detect surface irregularities and dimensional defects
-- **Distance measurements**: Measure object dimensions and distances accurately
-- **Enhanced accuracy**: Combine RGB and depth data for more reliable defect identification
-- **Multi-modal sensing**: Utilize color, depth, and infrared streams for comprehensive analysis
+종속성(주요)
+- Flask
+- OpenCV
+- NumPy
+- TensorFlow
+- Ultralytics (YOLO)
+- pyrealsense2 (RealSense 연동, 하드웨어 필요)
 
+개발
+- 주요 파일
+   - `app.py` — Flask 앱
+   - `example.py` — RealSense 샘플
+   - `config.py` — 설정
+   - `requirements.txt` — 의존성
 
-The server will start on `http://localhost:5000`
+라이선스
+- 자세한 내용은 `LICENSE` 파일을 확인하세요.
 
-### API Endpoints
-- `GET /` - Welcome message
-- `GET /health` - Health check endpoint
+기타
+- TensorFlow GPU 환경을 사용하려면 시스템의 CUDA/cuDNN 버전과 TensorFlow 버전 호환을 반드시 확인하세요.
+- 필요하시면 README에 설치 스크립트 또는 Dockerfile을 추가해 드립니다.
 
-## Dependencies
-- **Flask**: Web framework for building REST APIs
-- **OpenCV**: Computer vision and image processing
-- **TensorFlow**: Deep learning framework
-- **Ultralytics**: YOLO models for object detection
-- **SAM2**: Segment Anything Model for image segmentation
-
-## Development
-
-### Project Structure
-```
-404-ai/
-├── app.py              # Main Flask application
-├── requirements.txt    # Python dependencies
-├── setup.py           # Package setup configuration
-├── README.md          # This file
-└── .gitignore         # Git ignore rules
-```
-
-## License
-See LICENSE file for details.

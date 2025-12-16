@@ -66,11 +66,12 @@ def load_data(img_shape, data_dir=None, max_images=None):
         X_train = np.random.normal(0, 1, (1000, img_shape[0], img_shape[1], img_shape[2]))
         return X_train
 
-    # 가능한 확장자 수집
+    # 가능한 확장자 수집 (하위 폴더를 포함하여 재귀적으로 검색)
     exts = ('*.jpg', '*.jpeg', '*.png', '*.bmp')
     paths = []
     for e in exts:
-        paths.extend(sorted(glob.glob(os.path.join(data_dir, e))))
+        pattern = os.path.join(data_dir, '**', e)
+        paths.extend(sorted(glob.glob(pattern, recursive=True)))
 
     if max_images is not None and max_images > 0:
         paths = paths[:max_images]
@@ -100,7 +101,14 @@ def load_data(img_shape, data_dir=None, max_images=None):
         except Exception as e:
             print(f"이미지 로드 실패: {p} -> {e}")
 
+    if len(imgs) == 0:
+        print(f"⚠️ 경고: '{data_dir}'에서 로드 가능한 이미지가 없습니다. 랜덤 데이터를 사용합니다.")
+        X_train = np.random.normal(0, 1, (1000, img_shape[0], img_shape[1], img_shape[2]))
+        return X_train
+
     X_train = np.stack(imgs, axis=0)
+    # 진단 출력: 몇 장을 찾았는지 표시
+    print(f"Loaded {X_train.shape[0]} images from {data_dir} (first paths: {paths[:3]})")
     return X_train
 
 # ==========================================
@@ -119,6 +127,15 @@ def run_training(args):
 
     img_shape = (args.img_size, args.img_size, args.channels)
     gan = AnomalyGAN(img_shape, args.latent_dim, args.lr)
+    # Ensure discriminator is compiled before calling `train_on_batch`.
+    # AnomalyGAN builds `gan.gan` (generator+frozen discriminator) and optimizers,
+    # but the standalone discriminator needs to be compiled for `train_on_batch`.
+    try:
+        gan.discriminator.compile(optimizer=gan.d_optimizer, loss=gan.bce)
+    except Exception:
+        # If compilation fails for any reason, print a helpful message and re-raise.
+        print("Failed to compile discriminator; ensure optimizer and loss are valid.")
+        raise
     X_train = load_data(img_shape, args.data_dir, args.max_images)
 
     valid = np.ones((args.batch_size, 1))
@@ -159,46 +176,67 @@ def run_training(args):
         g_loss_history.append(float(g_loss))
 
         # Direct improvement check (absolute improvement)
-        if g_loss + min_delta < best_g_loss:
+        if float(g_loss) + min_delta < best_g_loss:
             best_g_loss = float(g_loss)
             gan.generator.save(f"{args.save_dir}/best_generator.h5")
-            print(f"Epoch {epoch}: 🔥 새로운 Best Model 저장됨! (G Loss: {g_loss:.6f})")
+            print(f"Epoch {epoch}: 🔥 새로운 Best Model 저장됨! (G Loss: {float(g_loss):.6f})")
             improved = True
             no_improve = 0
-            bonus_remaining = bonus_epochs
         else:
             # If we haven't reached minimum epochs, don't count as failure
             if epoch < min_epochs:
                 no_improve = 0
             else:
-                # If we have at least two windows, perform stagnation detection
-                if len(g_loss_history) >= 2 * stag_w:
+                # Sliding-window stagnation detection:
+                # Compare the average G-loss of the previous window vs current window.
+                # If current_avg + min_delta < prev_avg -> treat as improvement and reset counter.
+                if len(g_loss_history) >= 2 * stag_w and stag_w > 0:
                     prev_avg = float(np.mean(g_loss_history[-2 * stag_w:-stag_w]))
                     curr_avg = float(np.mean(g_loss_history[-stag_w:]))
-                    delta = prev_avg - curr_avg
-                    if delta < min_delta:
-                        no_improve += 1
+                    if curr_avg + min_delta < prev_avg:
+                        # improvement detected in the sliding window
+                        no_improve = 0
+                        # Large improvement handling: grant bonus epochs
+                        if prev_avg / max(curr_avg, 1e-12) > max_ratio:
+                            print(f"Epoch {epoch}: Large improvement detected (ratio {prev_avg/curr_avg:.2f}), granting bonus {bonus_epochs} epochs")
+                            bonus_remaining = max(bonus_remaining, bonus_epochs)
                     else:
-                        no_improve = 0
-
-                    # Large improvement handling: grant bonus epochs for further training
-                    if prev_avg / max(curr_avg, 1e-12) > max_ratio:
-                        print(f"Epoch {epoch}: Large improvement detected (ratio {prev_avg/curr_avg:.2f}), granting bonus {bonus_epochs} epochs")
-                        bonus_remaining = max(bonus_remaining, bonus_epochs)
-                        no_improve = 0
+                        # no improvement within the sliding window -> increment
+                        no_improve += 1
                 else:
+                    # Not enough history yet -> increment conservatively
                     no_improve += 1
 
-        # Consume bonus if present
+        # Consume bonus if present (bonus prevents early stopping while positive)
         if bonus_remaining > 0:
             effective_no_improve = 0
             bonus_remaining -= 1
         else:
             effective_no_improve = no_improve
 
+        # Always print a short epoch summary so `no_improve` visibility is immediate.
+        try:
+            d_loss_val = float(d_loss[0])
+        except Exception:
+            d_loss_val = float(d_loss)
+        g_loss_val = float(g_loss)
+        # diagnostic info for sliding-window when available
+        win_info = ""
+        if stag_w > 0 and len(g_loss_history) >= 2 * stag_w:
+            prev_avg = float(np.mean(g_loss_history[-2 * stag_w:-stag_w]))
+            curr_avg = float(np.mean(g_loss_history[-stag_w:]))
+            win_info = f" prev_avg={prev_avg:.6f} curr_avg={curr_avg:.6f}"
+
+        # Short status printed every epoch (diagnostic: show G loss, best, and whether it improved)
+        print(f"Epoch {epoch} [no_improve: {no_improve}/{patience}] [effective_no_improve: {effective_no_improve}] [G: {g_loss_val:.6f}] [best: {best_g_loss:.6f}] [imp: {'Y' if improved else 'N'}]{win_info}")
+
+        # Detailed logging and sample saving still follow the original rules
         if epoch % args.interval == 0 or improved:
-            print(f"Epoch {epoch} [D loss: {d_loss[0]:.6f}] [G loss: {g_loss:.6f}] [best: {best_g_loss:.6f}] [no_improve: {no_improve}/{patience}] [bonus_left: {bonus_remaining}]")
-            gan.save_sample_images(epoch)
+            print(f"Epoch {epoch} [D loss: {d_loss_val:.6f}] [G loss: {g_loss_val:.6f}] [best: {best_g_loss:.6f}] [bonus_left: {bonus_remaining}]")
+            try:
+                gan.save_sample_images(args.save_dir, epoch)
+            except Exception as e:
+                print(f"샘플 저장 실패: {e}")
 
         # Early stopping: require minimum epochs and check effective no_improve
         if epoch >= min_epochs and effective_no_improve >= patience:
@@ -207,6 +245,32 @@ def run_training(args):
 
     final_model_path = f"{args.save_dir}/final_generator.h5"
     gan.generator.save(final_model_path)
+    # If recon export requested, also save a run-local recon model
+    export_reconstruction_model(gan.generator, X_train, os.path.join(args.save_dir, 'best_reconstructor.h5'), epochs=getattr(args, 'export_recon_epochs', 0), batch_size=args.batch_size)
+
+    # Optional: build an image->image recon model (encoder + frozen generator) for inference.
+    # This trains only the encoder for a few epochs to map images to the generator's latent space.
+    def export_reconstruction_model(generator, train_data, save_path, epochs=0, batch_size=16):
+        if epochs <= 0:
+            return None
+        import tensorflow as tf
+        from tensorflow.keras import layers, Model
+        encoder_input = layers.Input(shape=img_shape)
+        x = encoder_input
+        x = layers.Conv2D(64, 4, strides=2, padding='same', activation='leaky_relu')(x)
+        x = layers.Conv2D(128, 4, strides=2, padding='same', activation='leaky_relu')(x)
+        x = layers.Conv2D(256, 4, strides=2, padding='same', activation='leaky_relu')(x)
+        x = layers.Conv2D(256, 4, strides=2, padding='same', activation='leaky_relu')(x)
+        x = layers.Flatten()(x)
+        latent = layers.Dense(args.latent_dim)(x)
+
+        generator.trainable = False
+        recon = generator(latent)
+        recon_model = Model(encoder_input, recon, name='EncoderGeneratorRecon')
+        recon_model.compile(optimizer=tf.keras.optimizers.Adam(args.lr), loss='mae')
+        recon_model.fit(train_data, train_data, epochs=epochs, batch_size=batch_size, verbose=1, shuffle=True)
+        recon_model.save(save_path)
+        return save_path
 
     # 평가 및 글로벌 베스트와 비교
     # 현재 지표: 이 실행에서의 best generator loss (작을수록 좋음)
@@ -223,6 +287,8 @@ def run_training(args):
         if current_metric < best_metric:
             # 더 좋음 -> 갱신
             shutil.copyfile(f"{args.save_dir}/best_generator.h5", os.path.join('outputs', 'global_best_generator.h5'))
+            # export recon model if requested
+            export_reconstruction_model(gan.generator, X_train, os.path.join('outputs', 'global_best_reconstructor.h5'), epochs=getattr(args, 'export_recon_epochs', 0), batch_size=args.batch_size)
             data = {
                 'best_metric': current_metric,
                 'saved_at': datetime.utcnow().isoformat(),
@@ -245,6 +311,7 @@ def run_training(args):
     else:
         # 처음 베스트 설정
         shutil.copyfile(f"{args.save_dir}/best_generator.h5", os.path.join('outputs', 'global_best_generator.h5'))
+        export_reconstruction_model(gan.generator, X_train, os.path.join('outputs', 'global_best_reconstructor.h5'), epochs=getattr(args, 'export_recon_epochs', 0), batch_size=args.batch_size)
         data = {
             'best_metric': current_metric,
             'saved_at': datetime.utcnow().isoformat(),
@@ -285,6 +352,7 @@ def train():
     parser.add_argument('--max_improve_ratio', type=float, default=2.0, help='If avg(prev_window)/avg(curr_window) > this, treat as large improvement')
     parser.add_argument('--bonus_epochs_on_large_improve', type=int, default=3, help='Extra patience epochs after a large improvement')
     parser.add_argument('--prune_if_worse', type=bool, default=True, help='If True, delete run artifacts when not improving global best')
+    parser.add_argument('--export_recon_epochs', type=int, default=0, help='If >0, train a lightweight encoder+frozen-generator recon model for this many epochs and save as best_reconstructor.h5 (and global_best_reconstructor.h5 when improved)')
 
     args = parser.parse_args()
 

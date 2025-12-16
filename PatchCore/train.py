@@ -60,6 +60,31 @@ def make_synthetic_loader(n_images, batch_size):
     loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
     return loader
 
+def compute_anomaly_score(original, reconstructed):
+    """
+    단순 차이(Residual) 대신 MS-SSIM과 L1을 결합하여 점수 계산
+    """
+    # 1. L1 Distance (색상/밝기 차이)
+    l1_score = tf.reduce_mean(tf.abs(original - reconstructed), axis=-1)
+    
+    # 2. MS-SSIM (구조적 차이) - 이미지가 너무 작으면 일반 SSIM 사용
+    # tf.image.ssim_multiscale은 4D 텐서 필요
+    try:
+        ssim_score = tf.image.ssim_multiscale(original, reconstructed, max_val=2.0)
+    except:
+        ssim_score = tf.image.ssim(original, reconstructed, max_val=2.0)
+        
+    # SSIM은 높을수록 정상이므로, 1에서 빼서 "이상도"로 변환
+    ssim_loss = 1.0 - ssim_score 
+    
+    # 최종 스코어 맵 결합 (실험적으로 0.5:0.5 가중치 추천)
+    # 차원이 다를 수 있으므로 맞춤
+    l1_score = tf.expand_dims(l1_score, -1) # (H, W, 1)
+    ssim_loss = tf.reshape(ssim_loss, (-1, 1, 1, 1)) # 배치 단위 값일 수 있음 확인 필요
+    
+    # 픽셀 단위 히트맵을 원한다면 일반 SSIM을 맵 형태로 얻어야 함.
+    # 여기서는 간단히 전체 점수 반환 예시
+    return 0.5 * tf.reduce_mean(l1_score) + 0.5 * tf.reduce_mean(ssim_loss)
 
 def main():
     p = argparse.ArgumentParser()

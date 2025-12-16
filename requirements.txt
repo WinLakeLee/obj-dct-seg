@@ -1,6 +1,6 @@
 # Intel RealSense SDK for Python
--- This file delegates to the core requirements. Use the optional vision extras if needed.
-
+flask-mqtt
+paho-mqtt
 -r requirements-core.txt
 
 # Optional vision extras (see requirements-vision.txt)

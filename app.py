@@ -10,6 +10,10 @@ import config
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request
+from mqtt_utils import create_paho_client, publish_with_client, publish_mqtt, is_client_connected
+import threading
+from datetime import datetime
+import time
 from dotenv import load_dotenv
 
 # Load environment variables from .env (or DOTENV_PATH) before reading any settings
@@ -18,63 +22,73 @@ load_dotenv(dotenv_path=os.environ.get('DOTENV_PATH', '.env'), override=True)
 app = Flask(__name__)
 _EXECUTOR = ThreadPoolExecutor(max_workers=int(os.environ.get('APP_WORKERS', 4)))
 
+# MQTT settings (single broker for pub/sub)
+_MQTT_BROKER = (
+    os.environ.get('MQTT_BROKER')
+    or 'localhost'
+)
 
-def publish_mqtt(payload: dict) -> bool:
-    """Publish payload to output broker (jokebear by default).
+_MQTT_PORT = int(os.environ.get('MQTT_PORT') or 1883)
+_MQTT_TLS = ( os.environ.get('MQTT_TLS') or '0').lower() in ('1', 'true', 'yes')
+_MQTT_KEEPALIVE = int(os.environ.get('MQTT_KEEPALIVE', 60))
+_IN_TOPIC = os.environ.get('IN_MQTT_TOPIC') or 'camera01/control'
+_OUT_TOPIC = (
+ app.config.get('MQTT_TOPIC', 'camera01/result')
+)
+_OUT_QOS = int(os.environ.get('OUT_MQTT_QOS') or os.environ.get('MQTT_QOS') or 1)
 
-    Output settings (env):
-      - OUT_MQTT_BROKER (default: jokebear)
-      - OUT_MQTT_PORT   (default: 1883)
-      - OUT_MQTT_TOPIC  (default: camera01/result)
-      - OUT_MQTT_QOS    (default: 1)
-      - OUT_MQTT_USERNAME / OUT_MQTT_PASSWORD (optional)
-      - OUT_MQTT_TLS    ('1'/'true' to enable TLS)
+app.config['MQTT_BROKER_URL'] = _MQTT_BROKER
+app.config['MQTT_BROKER_PORT'] = _MQTT_PORT
+app.config['MQTT_KEEPALIVE'] = _MQTT_KEEPALIVE
+app.config['MQTT_TLS_ENABLED'] = _MQTT_TLS
+app.config['MQTT_CLEAN_SESSION'] = True
 
-    Backward compatibility: if OUT_* not set, falls back to MQTT_* and then defaults.
-    """
-    # Resolve settings with OUT_* taking precedence, then legacy MQTT_* envs, then defaults.
-    broker = os.environ.get('OUT_MQTT_BROKER') or os.environ.get('MQTT_BROKER') or 'jokebear'
-    port = int(os.environ.get('OUT_MQTT_PORT') or os.environ.get('MQTT_PORT') or 1883)
-    topic = (
-        os.environ.get('OUT_MQTT_TOPIC')
-        or os.environ.get('MQTT_TOPIC')
-        or app.config.get('MQTT_TOPIC', 'camera01/result')
-    )
-    qos = int(os.environ.get('OUT_MQTT_QOS') or os.environ.get('MQTT_QOS') or 1)
-    username = os.environ.get('OUT_MQTT_USERNAME') or os.environ.get('MQTT_USERNAME')
-    password = os.environ.get('OUT_MQTT_PASSWORD') or os.environ.get('MQTT_PASSWORD')
-    use_tls = (os.environ.get('OUT_MQTT_TLS') or os.environ.get('MQTT_TLS') or '0').lower() in (
-        '1',
-        'true',
-        'yes',
-    )
-
-    # Reuse mqtt_utils publish for consistency but override env via parameters
-    try:
-        import paho.mqtt.client as mqtt
-    except Exception:
-        return False
-
-    try:
-        client = mqtt.Client()
-        if username and password:
-            client.username_pw_set(username, password)
-        if use_tls:
+# Create a persistent paho client and wire callbacks. If broker is down,
+# create_paho_client will return a client (and log connection failure) but
+# publishing will be best-effort.
+_MQTT_CLIENT = None
+try:
+    def _on_message(client, userdata, message):
+        # delegate processing to executor
+        def _task():
+            resp = process_image_bytes(message.payload, f"mqtt_{message.topic.replace('/', '_')}.jpg", None)
             try:
-                client.tls_set()
+                publish_with_client(_MQTT_CLIENT, resp, topic=_OUT_TOPIC, qos=_OUT_QOS)
             except Exception:
-                pass
-        client.connect(broker, port, 60)
-        client.loop_start()
-        payload_str = json.dumps(payload, ensure_ascii=False)
-        client.publish(topic, payload_str, qos=qos)
-        client.loop_stop()
-        client.disconnect()
-        return True
-    except Exception:
-        return False
+                # fallback to ephemeral publish if persistent client fails
+                publish_mqtt(resp)
 
-# Load configuration based on environment
+        _EXECUTOR.submit(_task)
+
+    _MQTT_CLIENT = create_paho_client(on_message_cb=_on_message,
+                                      broker=_MQTT_BROKER,
+                                      port=_MQTT_PORT,
+                                      use_tls=_MQTT_TLS,
+                                      subscribe_topic=_IN_TOPIC,
+                                      qos=_OUT_QOS,
+                                      start_loop=True)
+except Exception as e:
+    _MQTT_CLIENT = None
+    print(f"MQTT client init failed: {e}")
+
+# Start a background monitor that periodically prints MQTT connection info.
+def _start_mqtt_monitor(interval: int = 10):
+    def _monitor():
+        while True:
+            try:
+                connected = is_client_connected(_MQTT_CLIENT)
+                now = datetime.now().isoformat()
+                print(f"[{now}] MQTT status: connected={connected} broker={_MQTT_BROKER}:{_MQTT_PORT} in_topic={_IN_TOPIC} out_topic={_OUT_TOPIC}")
+            except Exception:
+                print(f"[{datetime.now().isoformat()}] MQTT status: check failed")
+            time.sleep(interval)
+
+    t = threading.Thread(target=_monitor, daemon=True)
+    t.start()
+
+_start_mqtt_monitor()
+
+# Load configuration object
 env = os.environ.get('FLASK_ENV', 'development')
 # Support both a `config` dict (mapping env->obj) or the config module itself
 if isinstance(config, dict):
@@ -156,6 +170,9 @@ def process_image_bytes(data: bytes, filename: str = 'image.jpg', mimetype: str 
     return _call_services(files)
 
 
+# Note: legacy flask-mqtt decorators removed; using paho client created above.
+
+
 @app.route('/detect', methods=['POST'])
 def detect():
     if 'image' not in request.files:
@@ -167,52 +184,18 @@ def detect():
 
     data = file.read()
     resp = process_image_bytes(data, filename=file.filename, mimetype=file.mimetype)
-    publish_mqtt(resp)
+    if _MQTT_CLIENT is not None:
+        try:
+            publish_with_client(_MQTT_CLIENT, resp, topic=_OUT_TOPIC, qos=_OUT_QOS)
+        except Exception:
+            publish_mqtt(resp)
+    else:
+        publish_mqtt(resp)
     return jsonify(resp)
 
 
 if __name__ == '__main__':
-    # Start MQTT subscriber (shras) for inbound images
-    def _start_mqtt_listener():
-        try:
-            import paho.mqtt.client as mqtt
-        except Exception:
-            return
-
-        in_broker = os.environ.get('IN_MQTT_BROKER', 'shras')
-        in_port = int(os.environ.get('IN_MQTT_PORT', 1883))
-        in_topic = os.environ.get('IN_MQTT_TOPIC', 'camera01/control')
-        in_username = os.environ.get('IN_MQTT_USERNAME')
-        in_password = os.environ.get('IN_MQTT_PASSWORD')
-        in_tls = os.environ.get('IN_MQTT_TLS', '0').lower() in ('1', 'true', 'yes')
-
-        def on_message(client, userdata, msg):
-            # Offload heavy processing to executor and publish result to outbound broker
-            def _task():
-                resp = process_image_bytes(msg.payload, f'mqtt_{msg.topic.replace("/", "_")}.jpg', None)
-                publish_mqtt(resp)
-
-            _EXECUTOR.submit(_task)
-
-        try:
-            client = mqtt.Client()
-            if in_username and in_password:
-                client.username_pw_set(in_username, in_password)
-            if in_tls:
-                try:
-                    client.tls_set()
-                except Exception:
-                    pass
-            client.on_message = on_message
-            client.connect(in_broker, in_port, 60)
-            client.subscribe(in_topic)
-            client.loop_start()
-        except Exception:
-            pass
-
-    _start_mqtt_listener()
-
     debug = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 't')
     host = os.environ.get('HOST', '0.0.0.0')
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=debug, host=host, port=port)
+    app.run(debug=debug, use_reloader=False, host=host, port=port)

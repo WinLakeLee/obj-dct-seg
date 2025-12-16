@@ -1,0 +1,8 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements-vision.txt /app/
+RUN pip install --no-cache-dir -r requirements-vision.txt
+COPY . /app
+ENV PYTHONUNBUFFERED=1
+EXPOSE 5002
+CMD ["python", "inference_app.py"]

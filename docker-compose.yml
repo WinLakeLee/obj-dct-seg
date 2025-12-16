@@ -1,0 +1,39 @@
+version: '3.8'
+services:
+  detector:
+    build:
+      context: .
+      dockerfile: Dockerfile.detector
+    ports:
+      - "5001:5001"
+    environment:
+      - DETECTION_WEIGHTS=/app/yolo_training/weights/base/yolo11m.pt
+      - MQTT_BROKER=${MQTT_BROKER:-mqtt}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+    volumes:
+      - ./:/app
+  inference:
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
+    ports:
+      - "5002:5002"
+    environment:
+      - PATCHCORE_MODEL_DIR=/app/outputs/patchcore_model_dir
+      - GENERATOR_PATH=/app/outputs/global_best_generator.h5
+      - DETECTION_WEIGHTS=/app/yolo_training/weights/base/yolo11m.pt
+      - MQTT_BROKER=${MQTT_BROKER:-mqtt}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+    volumes:
+      - ./:/app
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    ports:
+      - "1883:1883"
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_config:/mosquitto/config
+
+volumes:
+  mosquitto_data:
+  mosquitto_config:

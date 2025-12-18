@@ -42,13 +42,13 @@ def main():
     args, _ = parser.parse_known_args()
 
     # support running the sweep for each class in an MVTec-style root
-    parser.add_argument("--mvtec-root", type=str, default="data/mvtec", help="MVTec root folder containing class subfolders")
+    parser.add_argument("--data-origin", dest="data_origin", type=str, default="data/mvtec", help="MVTec root folder containing class subfolders")
     parser.add_argument("--classes", type=str, default=None, help="Comma-separated list of class names to run (default: all subfolders in mvtec root)")
     # parse again to get new args
     args, _ = parser.parse_known_args()
 
     # determine classes to run
-    mvtec_root = Path(args.mvtec_root)
+    mvtec_root = Path(args.data_origin)
     if args.classes:
         classes = [c.strip() for c in args.classes.split(',') if c.strip()]
     else:

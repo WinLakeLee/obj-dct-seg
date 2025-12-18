@@ -103,10 +103,22 @@ python -m pip install -r requirements-vision.txt
 
 ## 사용법
 
-### 애플리케이션 실행
+### 애플리케이션 실행 (Flask Orchestrator)
 
 ```powershell
-python src/apps/app.py
+python -m src.apps.app
+```
+
+### Detector 서비스 (YOLO)
+
+```powershell
+uvicorn src.apps.detector_app:app --host 0.0.0.0 --port 5001
+```
+
+### Inference 서비스 (GAN + PatchCore)
+
+```powershell
+uvicorn src.apps.inference_app:app --host 0.0.0.0 --port 5002
 ```
 
 ### 예제 (RealSense 테스트)

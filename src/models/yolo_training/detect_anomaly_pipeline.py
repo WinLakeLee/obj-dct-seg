@@ -23,16 +23,24 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ultralytics import YOLO
 from PatchCore.patch_core import PatchCoreOptimized
+try:
+    from EfficientAD.PDN import EfficientAD
+except Exception:
+    EfficientAD = None
 
 
 class ScratchDetectionPipeline:
     def __init__(
         self,
-        yolo_model_path='yolo_training/runs/seg_toycar3/weights/last.pt',
+        yolo_model_path='yolo_training/runs/toycar6/weights/last.pt',
         patchcore_checkpoint='models/patchcore_scratch',
         device='cuda',
         conf_threshold=0.25,
         anomaly_threshold=33.08,  # PatchCore 임계값
+        anomaly_model='patchcore',  # 'patchcore' or 'gan' or 'efficientad'
+        gan_generator_path=None,
+        efficientad_checkpoint=None,
+        efficientad_image_size=256,
     ):
         """
         이상 감지 파이프라인 초기화
@@ -67,14 +75,35 @@ class ScratchDetectionPipeline:
         print(f"📦 YOLO 모델 로드: {yolo_model_path}")
         self.yolo_model = YOLO(yolo_model_path)
         
-        # 2. PatchCore 모델 로드
-        print(f"🧠 PatchCore 모델 로드: {patchcore_checkpoint}")
-        self.patchcore = self._load_patchcore(patchcore_checkpoint)
+        # 2. anomaly 모델 로드 (PatchCore 또는 GAN)
+        self.anomaly_model = anomaly_model.lower() if isinstance(anomaly_model, str) else 'patchcore'
+        if self.anomaly_model == 'patchcore':
+            print(f"🧠 PatchCore 모델 로드: {patchcore_checkpoint}")
+            self.patchcore = self._load_patchcore(patchcore_checkpoint)
+        elif self.anomaly_model == 'gan':
+            print(f"🧠 GAN generator 로드: {gan_generator_path}")
+            self.gan = self._load_gan(gan_generator_path)
+        elif self.anomaly_model == 'efficientad':
+            if EfficientAD is None:
+                raise RuntimeError("EfficientAD 모듈을 찾을 수 없습니다. EfficientAD 폴더가 있어야 합니다.")
+            print(f"🧠 EfficientAD 로드 (ckpt={efficientad_checkpoint})")
+            self.efficientad = self._load_efficientad(efficientad_checkpoint, efficientad_image_size)
+        else:
+            raise ValueError(f"지원하지 않는 anomaly_model: {anomaly_model}")
         
         # 3. PatchCore용 이미지 전처리
         self.patchcore_transform = transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+        # EfficientAD 전처리 (기본 256)
+        self.efficientad_image_size = efficientad_image_size
+        self.efficientad_transform = transforms.Compose([
+            transforms.Resize(self.efficientad_image_size),
+            transforms.CenterCrop(self.efficientad_image_size),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
@@ -108,6 +137,78 @@ class ScratchDetectionPipeline:
         model.n_neighbors = meta['n_neighbors']
         model._build_index()
         
+        return model
+
+    def _load_gan(self, generator_path):
+        """GAN generator 로드 (Keras .h5 파일 예상)."""
+        if generator_path is None:
+            raise ValueError("gan_generator_path가 필요합니다 (anomaly_model='gan'일 때)")
+        try:
+            import tensorflow as tf
+            from tensorflow.keras.models import load_model
+        except Exception as e:
+            raise RuntimeError("TensorFlow가 필요합니다: pip install tensorflow") from e
+
+        gen = load_model(generator_path)
+
+        class GANWrapper:
+            def __init__(self, model):
+                self.model = model
+
+            def predict(self, img_tensor, score_type='mse'):
+                # img_tensor: torch-like or numpy 4D tensor in [B,C,H,W] with values in [0,1] or [0,255]
+                import numpy as _np
+                # convert to numpy
+                if hasattr(img_tensor, 'detach'):
+                    try:
+                        img_np = img_tensor.detach().cpu().numpy()
+                    except Exception:
+                        img_np = _np.array(img_tensor)
+                else:
+                    img_np = _np.array(img_tensor)
+
+                # normalize if needed
+                if img_np.max() > 2.0:
+                    img_np = img_np / 255.0
+
+                # transpose to NHWC if necessary
+                if img_np.shape[1] == 3:
+                    img_np = _np.transpose(img_np, (0, 2, 3, 1))
+
+                # run generator
+                recon = self.model.predict(img_np)
+
+                # compute per-sample MSE
+                mse = _np.mean(_np.square(recon - img_np), axis=(1,2,3))
+                return mse.tolist()
+
+        return GANWrapper(gen)
+
+    def _load_efficientad(self, checkpoint_path=None, image_size=256):
+        """EfficientAD 모델 초기화 및 체크포인트 로드"""
+        try:
+            from EfficientAD.PDN import EfficientAD
+        except Exception as e:
+            raise RuntimeError("EfficientAD 모듈을 불러올 수 없습니다") from e
+
+        model = EfficientAD(image_size=image_size)
+
+        # checkpoint가 주어지면 간단히 로드 시도
+        if checkpoint_path:
+            ckpt = Path(checkpoint_path)
+            if ckpt.exists():
+                try:
+                    data = torch.load(str(ckpt), map_location=self.device)
+                    # data가 dict 형태면 시도하여 student/ae 불러오기
+                    if isinstance(data, dict):
+                        # try keys
+                        if 'student_state_dict' in data:
+                            model.student.load_state_dict(data['student_state_dict'], strict=False)
+                        if 'ae_state_dict' in data:
+                            model.ae.load_state_dict(data['ae_state_dict'], strict=False)
+                except Exception:
+                    pass
+
         return model
     
     def detect_car_regions(self, image_path):
@@ -160,14 +261,36 @@ class ScratchDetectionPipeline:
         # 전처리 및 배치 차원 추가
         img_tensor = self.patchcore_transform(pil_img).unsqueeze(0)
         
-        # PatchCore 추론
-        scores = self.patchcore.predict(img_tensor, score_type='max')
-        anomaly_score = scores[0]
-        
-        is_anomaly = anomaly_score >= self.anomaly_threshold
+        # anomaly 모델 추론 (PatchCore / GAN / EfficientAD)
+        if self.anomaly_model == 'patchcore':
+            scores = self.patchcore.predict(img_tensor, score_type='max')
+            anomaly_score = float(scores[0])
+            is_anomaly = anomaly_score >= self.anomaly_threshold
+        elif self.anomaly_model == 'gan':
+            # GAN은 재구성 오차(MSE)를 사용
+            scores = self.gan.predict(img_tensor, score_type='mse')
+            anomaly_score = float(scores[0])
+            is_anomaly = anomaly_score >= self.anomaly_threshold
+        elif self.anomaly_model == 'efficientad':
+            # EfficientAD는 자체적으로 (map, score)를 반환
+            # EfficientAD expects a torch Tensor (1,3,H,W)
+            try:
+                ea_tensor = self.efficientad_transform(pil_img).unsqueeze(0)
+                # ensure torch tensor
+                import torch as _torch
+                if not isinstance(ea_tensor, _torch.Tensor):
+                    ea_tensor = _torch.tensor(ea_tensor)
+                anomaly_map, anomaly_score = self.efficientad.predict(ea_tensor)
+                anomaly_score = float(anomaly_score)
+                is_anomaly = anomaly_score >= self.anomaly_threshold
+            except Exception:
+                anomaly_score = 0.0
+                is_anomaly = False
+        else:
+            raise RuntimeError(f"Unknown anomaly_model: {self.anomaly_model}")
 
         return {
-            'is_anomaly': is_anomaly,
+            'is_anomaly': bool(is_anomaly),
             'score': anomaly_score,
             'threshold': self.anomaly_threshold,
         }
@@ -325,6 +448,10 @@ def main():
     parser.add_argument('--conf', type=float, default=0.25, help='YOLO 신뢰도 임계값')
     parser.add_argument('--anomaly-threshold', type=float, default=33.08, help='PatchCore anomaly 임계값')
     parser.add_argument('--device', type=str, default='cuda', help='cuda or cpu')
+    parser.add_argument('--anomaly-model', type=str, default='patchcore', help="anomaly model: 'patchcore','gan','efficientad'")
+    parser.add_argument('--gan-generator', type=str, default=None, help='GAN generator .h5 경로 (anomaly-model=gan)')
+    parser.add_argument('--efficientad-checkpoint', type=str, default=None, help='EfficientAD checkpoint 경로 (optional)')
+    parser.add_argument('--efficientad-img-size', type=int, default=256, help='EfficientAD 입력 이미지 크기')
     
     args = parser.parse_args()
     
@@ -335,6 +462,10 @@ def main():
         device=args.device,
         conf_threshold=args.conf,
         anomaly_threshold=args.anomaly_threshold,
+        anomaly_model=args.anomaly_model,
+        gan_generator_path=args.gan_generator,
+        efficientad_checkpoint=args.efficientad_checkpoint,
+        efficientad_image_size=args.efficientad_img_size,
     )
     
     # 단일 이미지 처리

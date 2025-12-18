@@ -97,21 +97,53 @@ def _default_train_val(class_name: str):
 
 
 def get_data_paths(class_name: str | None = None):
-	"""Return (train_dir, val_dir) using env overrides when present.
+	"""Return (train_dir, val_dir) using env overrides with flexible fallbacks.
 
 	Priority:
 	1) TRAIN_DIR / VAL_DIR env
-	2) MVTEC_ROOT + class layout (train/good, valid[/good])
+	2) MVTEC layout (train/good, valid[/good])
+	3) Sibling layout without "good" (e.g., data/classification/train)
 	"""
 	cls = class_name or DATA_CLASS
-	train_dir = Path(DATA_TRAIN_DIR_ENV) if DATA_TRAIN_DIR_ENV else None
-	val_dir = Path(DATA_VAL_DIR_ENV) if DATA_VAL_DIR_ENV else None
+	env_train = Path(DATA_TRAIN_DIR_ENV) if DATA_TRAIN_DIR_ENV else None
+	env_val = Path(DATA_VAL_DIR_ENV) if DATA_VAL_DIR_ENV else None
 
-	if train_dir is None or val_dir is None:
-		d_train, d_val = _default_train_val(cls)
-		train_dir = train_dir or d_train
-		val_dir = val_dir or d_val
-	return train_dir, val_dir
+	# Explicit env overrides win
+	if env_train and env_val:
+		return env_train, env_val
+
+	candidates: list[tuple[Path, Path | None]] = []
+
+	# Standard MVTEC layout
+	mvtec_train = DATA_ORIGIN / cls / 'train' / 'good'
+	mvtec_val_good = DATA_ORIGIN / cls / 'valid' / 'good'
+	mvtec_val = DATA_ORIGIN / cls / 'valid'
+	mvtec_train_plain = DATA_ORIGIN / cls / 'train'
+	candidates.append((mvtec_train, mvtec_val_good))
+	candidates.append((mvtec_train, mvtec_val))
+	candidates.append((mvtec_train_plain, mvtec_val))
+	candidates.append((mvtec_train_plain, mvtec_train_plain))
+
+	# Sibling layout: data/<cls>/train[/images], valid|val[/images]
+	sibling_root = DATA_ORIGIN.parent / cls
+	sibling_train = sibling_root / 'train'
+	sibling_val = sibling_root / 'valid'
+	sibling_val_alt = sibling_root / 'val'
+	candidates.append((sibling_train / 'images', sibling_val / 'images'))
+	candidates.append((sibling_train, sibling_val))
+	candidates.append((sibling_train, sibling_val_alt))
+	candidates.append((sibling_train, sibling_train))
+
+	for t_dir, v_dir in candidates:
+		if t_dir.exists():
+			if v_dir and v_dir.exists():
+				return t_dir, v_dir
+			return t_dir, t_dir
+
+	# Fallback to env partial or defaults even if missing (caller may handle existence)
+	if env_train or env_val:
+		return env_train or mvtec_train_plain, env_val or mvtec_val
+	return mvtec_train_plain, mvtec_val
 
 
 def get_save_dir(default: str = 'outputs/efficientad'):

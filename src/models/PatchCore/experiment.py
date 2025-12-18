@@ -13,20 +13,76 @@ from PatchCore.train import make_dataloader_from_folder, ImageFolderNoLabel
 
 
 def evaluate_on_folder(pc, folder, batch_size=8, workers=2):
-    # returns mean anomaly score across folder
+    # returns mean anomaly score across folder and classification metrics when labels can be inferred
     from PatchCore.predict import make_loader
+    from sklearn.metrics import roc_auc_score, average_precision_score, precision_recall_curve
+
     loader = make_loader(folder, batch_size, workers)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pc.to(device)
     scores = []
+    labels = []
+
     for batch in loader:
         imgs, paths = batch
         imgs = imgs.to(device)
         res = pc.predict(imgs)
+        # pc.predict may return list per image or a single value
         if not isinstance(res, (list, tuple)):
-            res = [res]
-        scores.extend(res)
-    return float(np.mean(scores)), scores
+            # if a single value for the whole batch, expand
+            res = [res] * imgs.shape[0]
+
+        # collect scores and infer labels from paths when possible
+        for p_idx, p in enumerate(paths):
+            try:
+                score = float(res[p_idx])
+            except Exception:
+                # fallback if indexing mismatch
+                score = float(res[0]) if len(res) > 0 else 0.0
+            scores.append(score)
+
+            # Infer label: if the parent folder name is 'good' (or 'good.png' style), treat as normal (0), else anomaly (1)
+            try:
+                pp = Path(p)
+                # parent directory name (one level up) often indicates class (e.g., 'good' vs 'broken')
+                parent = pp.parent.name.lower()
+                if parent in ('good', 'ok', 'normal'):
+                    labels.append(0)
+                else:
+                    labels.append(1)
+            except Exception:
+                labels.append(None)
+
+    mean_score = float(np.mean(scores)) if len(scores) > 0 else float('nan')
+
+    # Compute classification metrics if we have valid labels (no None)
+    metrics = {}
+    if len(labels) == len(scores) and all(l in (0, 1) for l in labels):
+        y_true = np.array(labels)
+        y_scores = np.array(scores)
+        try:
+            metrics['roc_auc'] = float(roc_auc_score(y_true, y_scores))
+        except Exception:
+            metrics['roc_auc'] = None
+        try:
+            metrics['average_precision'] = float(average_precision_score(y_true, y_scores))
+        except Exception:
+            metrics['average_precision'] = None
+
+        # precision/recall at optimal F1 threshold
+        try:
+            precisions, recalls, thresholds = precision_recall_curve(y_true, y_scores)
+            f1_scores = 2 * (precisions * recalls) / (precisions + recalls + 1e-12)
+            best_idx = int(np.argmax(f1_scores))
+            best_thresh = thresholds[best_idx] if best_idx < len(thresholds) else (thresholds[-1] if len(thresholds) else 0.0)
+            metrics['best_f1'] = float(f1_scores[best_idx])
+            metrics['best_precision'] = float(precisions[best_idx])
+            metrics['best_recall'] = float(recalls[best_idx])
+            metrics['best_threshold'] = float(best_thresh)
+        except Exception:
+            metrics['best_f1'] = metrics['best_precision'] = metrics['best_recall'] = metrics['best_threshold'] = None
+
+    return mean_score, scores, labels, metrics
 
 
 def main():

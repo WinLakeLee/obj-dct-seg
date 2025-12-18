@@ -3,6 +3,8 @@ import argparse
 from pathlib import Path
 import numpy as np
 from PIL import Image
+import json
+from src.utils.metrics import infer_labels_from_paths, compute_classification_metrics
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
@@ -97,6 +99,19 @@ def main():
         w.writerow(['path','anomaly_score'])
         w.writerows(rows)
     print('Saved CSV to', args.out_csv)
+
+    # compute metrics if labels can be inferred
+    paths = [r[0] for r in rows]
+    scores = [r[1] for r in rows]
+    labels = infer_labels_from_paths(paths)
+    metrics = {}
+    if len(labels) == len(scores) and all(l in (0,1) for l in labels):
+        metrics = compute_classification_metrics(labels, scores)
+        metrics_path = os.path.splitext(args.out_csv)[0] + '_metrics.json'
+        with open(metrics_path, 'w', encoding='utf-8') as mf:
+            json.dump(metrics, mf, indent=2)
+        print('Saved metrics to', metrics_path)
+        print('Metrics:', metrics)
 
 if __name__ == '__main__':
     main()

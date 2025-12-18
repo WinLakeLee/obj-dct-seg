@@ -22,6 +22,30 @@ def _parse_list(arg, cast):
     return [cast(x) for x in arg.split(',') if x.strip()]
 
 
+def parse_combo_string(raw: str, default_bs: int):
+    """Parse 'sr:nn:resize:crop[:bs]' combos string."""
+    combos = []
+    for item in raw.split(','):
+        parts = item.split(':')
+        if len(parts) not in (4, 5):
+            continue
+        try:
+            sr = float(parts[0]); nn = int(parts[1]); rz = int(parts[2]); cp = int(parts[3])
+            bs = int(parts[4]) if len(parts) == 5 else default_bs
+            combos.append((sr, nn, rz, cp, bs))
+        except ValueError:
+            continue
+    return combos
+
+
+def build_combos(preset: str, *, sampling, neighbors, resize, crop, batch_size):
+    grid = list(itertools.product(sampling, neighbors, resize, crop))
+    if preset == 'best':
+        # Use the same defaults as the previous behavior to avoid surprises
+        return [(sr, nn, rz, cp, batch_size) for sr, nn, rz, cp in grid]
+    return [(sr, nn, rz, cp, batch_size) for sr, nn, rz, cp in grid]
+
+
 def tensor_only(loader):
     for batch in loader:
         if isinstance(batch, (list, tuple)) and len(batch) >= 1:
@@ -32,7 +56,8 @@ def tensor_only(loader):
 
 def main():
     p = argparse.ArgumentParser(description="PatchCore grid sweep")
-    p.add_argument('--classes', type=str, default=None, help='comma list of class names (default: config.DATA_CLASS)')
+    p.add_argument('--data-origin', dest='data_origin', type=str, default=str(config.DATA_ORIGIN), help='Root containing mvtec-style class folders')
+    p.add_argument('--classes', type=str, default=None, help='comma list of class names (default: all under mvtec root, else config.DATA_CLASS)')
     p.add_argument('--sampling-ratios', type=str, default='0.01,0.05', help='comma list of sampling ratios')
     p.add_argument('--neighbors', type=str, default='5,9,15', help='comma list of k for KNN')
     p.add_argument('--resize-sizes', type=str, default='256,320', help='comma list of resize values')
@@ -51,6 +76,8 @@ def main():
     p.add_argument('--checkpoint-interval', type=int, default=100)
     p.add_argument('--device', type=str, default=None)
     p.add_argument('--seed', type=int, default=None)
+    p.add_argument('--preset', type=str, choices=['best', 'all'], default='best', help='GAN-style preset for the combo grid')
+    p.add_argument('--combos', type=str, default=None, help="Explicit combos 'sr:nn:resize:crop[:bs],...' overrides preset/lists")
     args = p.parse_args()
 
     device = torch.device(args.device if args.device else ('cuda' if torch.cuda.is_available() else 'cpu'))
@@ -60,15 +87,33 @@ def main():
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(args.seed)
 
-    classes = (
-        [c.strip() for c in args.classes.split(',') if c.strip()]
-        if args.classes
-        else [config.DATA_CLASS]
-    )
+    mvtec_root = Path(args.data_origin)
+    config.DATA_ORIGIN = mvtec_root
+
+    if args.classes:
+        classes = [c.strip() for c in args.classes.split(',') if c.strip()]
+    elif mvtec_root.exists():
+        classes = [p.name for p in sorted(mvtec_root.iterdir()) if p.is_dir()]
+    else:
+        classes = [config.DATA_CLASS]
+
     sampling_ratios = _parse_list(args.sampling_ratios, float)
     neighbors = _parse_list(args.neighbors, int)
     resize_sizes = _parse_list(args.resize_sizes, int)
     crop_sizes = _parse_list(args.crop_sizes, int)
+
+    combos = build_combos(
+        args.preset,
+        sampling=sampling_ratios,
+        neighbors=neighbors,
+        resize=resize_sizes,
+        crop=crop_sizes,
+        batch_size=args.batch_size,
+    )
+    if args.combos:
+        parsed = parse_combo_string(args.combos, default_bs=args.batch_size)
+        if parsed:
+            combos = parsed
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -77,14 +122,15 @@ def main():
 
     for cls in classes:
         train_dir, val_dir = config.get_data_paths(cls)
+        if not Path(train_dir).exists():
+            print(f"[skip] train dir missing: {train_dir}")
+            continue
         class_results = []
         best = None
         print(f"\n=== Class {cls}: train={train_dir} val={val_dir} ===")
 
-        for sampling_ratio, n_neighbors, resize_size, crop_size in itertools.product(
-            sampling_ratios, neighbors, resize_sizes, crop_sizes
-        ):
-            exp_name = f"sr{sampling_ratio:.3f}_nn{n_neighbors}_r{resize_size}_c{crop_size}"
+        for sampling_ratio, n_neighbors, resize_size, crop_size, batch_size in combos:
+            exp_name = f"sr{sampling_ratio:.3f}_nn{n_neighbors}_r{resize_size}_c{crop_size}_bs{batch_size}"
             exp_dir = out_dir / cls / exp_name
             ckpt_dir = exp_dir / 'checkpoints'
             exp_dir.mkdir(parents=True, exist_ok=True)
@@ -92,7 +138,7 @@ def main():
             print(f"Running {exp_name}")
             loader = make_dataloader_from_folder(
                 str(train_dir),
-                args.batch_size,
+                batch_size,
                 args.workers,
                 resize_size=resize_size,
                 crop_size=crop_size,
@@ -115,23 +161,26 @@ def main():
                 checkpoint_interval=args.checkpoint_interval,
             )
 
-            mean_score, scores = evaluate_on_folder(
+            mean_score, scores, labels, metrics = evaluate_on_folder(
                 pc,
                 str(val_dir),
-                batch_size=args.batch_size,
+                batch_size=batch_size,
                 workers=args.workers,
             )
 
-            class_results.append(
-                dict(
-                    name=exp_name,
-                    sampling_ratio=sampling_ratio,
-                    n_neighbors=n_neighbors,
-                    resize_size=resize_size,
-                    crop_size=crop_size,
-                    mean_score=mean_score,
-                )
+            entry = dict(
+                name=exp_name,
+                sampling_ratio=sampling_ratio,
+                n_neighbors=n_neighbors,
+                resize_size=resize_size,
+                crop_size=crop_size,
+                batch_size=batch_size,
+                mean_score=mean_score,
             )
+            if isinstance(metrics, dict) and metrics:
+                entry['metrics'] = metrics
+
+            class_results.append(entry)
 
             with open(exp_dir / 'result.json', 'w', encoding='utf-8') as f:
                 json.dump(class_results[-1], f, indent=2)
@@ -142,9 +191,14 @@ def main():
 
             # save validation scores for inspection
             with open(exp_dir / 'valid_scores.csv', 'w', encoding='utf-8') as f:
-                f.write('index,score\n')
-                for idx, s in enumerate(scores):
-                    f.write(f"{idx},{s}\n")
+                if labels and len(labels) == len(scores):
+                    f.write('index,score,label\n')
+                    for idx, (s, l) in enumerate(zip(scores, labels)):
+                        f.write(f"{idx},{s},{l}\n")
+                else:
+                    f.write('index,score\n')
+                    for idx, s in enumerate(scores):
+                        f.write(f"{idx},{s}\n")
 
         summary[cls] = {"best": best, "results": class_results}
 

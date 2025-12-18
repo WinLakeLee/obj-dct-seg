@@ -7,7 +7,7 @@ import os
 import logging
 import timm
 
-from common.data_utils import build_torch_transform, make_torch_dataloader
+from src.utils.data_utils import build_torch_transform, make_torch_dataloader
 
 
 # 로깅 설정

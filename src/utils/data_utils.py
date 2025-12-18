@@ -1,5 +1,4 @@
-"""Shared data utilities for GAN, EfficientAD, and PatchCore.
-All helpers here are framework-agnostic to keep data handling consistent.
+"""Shared data utilities moved into `src.utils.data_utils`.
 """
 import glob
 import os
@@ -18,7 +17,6 @@ DEFAULT_EXTS: Sequence[str] = ("*.jpg", "*.jpeg", "*.png", "*.bmp")
 
 
 def set_global_seed(seed: int | None):
-    """Set numpy/torch seeds when provided."""
     if seed is None:
         return
     np.random.seed(seed)
@@ -28,7 +26,6 @@ def set_global_seed(seed: int | None):
 
 
 def find_first_class(root: str | Path | None = None) -> str:
-    """Return the first class folder name under the given root."""
     base = Path(root or config.DATA_ORIGIN)
     for p in sorted(base.iterdir()):
         if p.is_dir():
@@ -50,7 +47,6 @@ def load_numpy_images(
     img_shape: tuple[int, int, int],
     max_images: int | None = None,
 ) -> np.ndarray:
-    """Load images into a numpy array shaped (N, H, W, C) and scaled to [-1, 1]."""
     paths = list_images(data_dir, recursive=True)
     if max_images is not None and max_images > 0:
         paths = paths[:max_images]
@@ -84,8 +80,6 @@ def load_numpy_images(
 
 
 class ImageFolderNoLabel(Dataset):
-    """Simple image dataset without labels (recursive glob)."""
-
     def __init__(self, root: str | Path, transform=None, exts: Iterable[str] = DEFAULT_EXTS, recursive: bool = True):
         self.paths = list_images(root, exts=exts, recursive=recursive)
         self.transform = transform

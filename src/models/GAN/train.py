@@ -10,7 +10,7 @@ from .gan import AnomalyGAN
 from pathlib import Path
 import config
 
-from common.data_utils import find_first_class, load_numpy_images
+from src.utils.data_utils import find_first_class, load_numpy_images
 import matplotlib.pyplot as plt
 
 # ==========================================

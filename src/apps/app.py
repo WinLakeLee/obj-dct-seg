@@ -6,7 +6,7 @@ Inference service: inference_app.py (GAN reconstruction + PatchCore)
 
 import os
 import json
-from configs import config
+from . import config
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request
@@ -42,6 +42,12 @@ _MQTT_KEEPALIVE = int(os.environ.get("MQTT_KEEPALIVE", 60))
 _IN_TOPIC = os.environ.get("IN_MQTT_TOPIC") or "camera01/control"
 _OUT_TOPIC = app.config.get("MQTT_TOPIC", "camera01/result")
 _OUT_QOS = int(os.environ.get("OUT_MQTT_QOS") or os.environ.get("MQTT_QOS") or 1)
+
+# Downstream service endpoints (call over HTTP, do not import heavy models here)
+_DETECTOR_URL = os.environ.get("DETECTOR_URL", "http://localhost:5001/detect")
+_INFER_RECON_URL = os.environ.get("INFERENCE_RECON_URL", "http://localhost:5002/reconstruct")
+_INFER_PATCH_URL = os.environ.get("INFERENCE_PATCH_URL", "http://localhost:5002/patchcore_predict")
+_HTTP_TIMEOUT = float(os.environ.get("APP_HTTP_TIMEOUT", 15))
 
 app.config["MQTT_BROKER_URL"] = _MQTT_BROKER
 app.config["MQTT_BROKER_PORT"] = _MQTT_PORT
@@ -202,7 +208,7 @@ try:
         yolo_model_path=os.environ.get(
             "YOLO_MODEL_PATH",
             os.path.join(
-                "src", "models", "yolo_training", "runs", "seg_toycar3", "weights", "last.pt"
+                "src", "models", "yolo_training", "runs", "toycar6", "weights", "last.pt"
             ),
         ),
         patchcore_checkpoint=os.environ.get(
@@ -301,6 +307,31 @@ def process_image_bytes(
         "image": (filename or "image.jpg", data, mimetype or img_info["mime_type"])
     }
 
+    # Detector service (HTTP)
+    detector_result = {"error": "detector_not_configured"}
+    if _DETECTOR_URL:
+        try:
+            resp = requests.post(_DETECTOR_URL, files=files, timeout=_HTTP_TIMEOUT)
+            detector_result = resp.json()
+        except Exception as e:
+            detector_result = {"error": "detector_request_failed", "detail": str(e)}
+
+    # Inference service (HTTP) - reconstruct and patchcore
+    infer_recon = {"error": "inference_recon_not_configured"}
+    infer_patch = {"error": "inference_patch_not_configured"}
+    if _INFER_RECON_URL:
+        try:
+            resp = requests.post(_INFER_RECON_URL, files=files, timeout=_HTTP_TIMEOUT)
+            infer_recon = resp.json()
+        except Exception as e:
+            infer_recon = {"error": "inference_recon_request_failed", "detail": str(e)}
+    if _INFER_PATCH_URL:
+        try:
+            resp = requests.post(_INFER_PATCH_URL, files=files, timeout=_HTTP_TIMEOUT)
+            infer_patch = resp.json()
+        except Exception as e:
+            infer_patch = {"error": "inference_patch_request_failed", "detail": str(e)}
+
     # Scratch Detection Pipeline 결과
     scratch_result = {"error": "scratch_detection_not_available"}
     if _SCRATCH_PIPELINE is not None:
@@ -358,6 +389,11 @@ def process_image_bytes(
     # 결과 통합
     return {
         "result": "detected" if scratch_result.get("scratch_detected") else "ok",
+        "detector": detector_result,
+        "inference": {
+            "reconstruct": infer_recon,
+            "patchcore": infer_patch,
+        },
         "scratch_detection": scratch_result,
         "timestamp": datetime.now().isoformat(),
     }

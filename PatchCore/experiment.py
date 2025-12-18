@@ -17,7 +17,7 @@ def evaluate_on_folder(pc, folder, batch_size=8, workers=2):
     from PatchCore.predict import make_loader
     loader = make_loader(folder, batch_size, workers)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    pc.backbone.to(device)
+    pc.to(device)
     scores = []
     for batch in loader:
         imgs, paths = batch
@@ -56,7 +56,7 @@ def main():
 
         pc = PatchCoreFromScratch()
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        pc.backbone.to(device)
+        pc.to(device)
 
         # build dataloader (re-use train.make_dataloader_from_folder)
         loader = make_dataloader_from_folder(args.data_dir, args.batch_size, args.workers)

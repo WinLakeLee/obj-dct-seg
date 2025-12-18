@@ -1,7 +1,6 @@
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras import layers, Model, optimizers
-from tensorflow.keras.applications import VGG19
 import time
 import os
 

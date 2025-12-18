@@ -82,6 +82,7 @@ def main():
     p.add_argument('--out-csv', type=str, default='predictions.csv')
     p.add_argument('--out-visuals', type=str, default='visuals')
     p.add_argument('--kneighbors-batch', type=int, default=4096)
+    p.add_argument('--n-neighbors', type=int, default=9, help='neighbors used when rebuilding KNN')
     args = p.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -90,16 +91,18 @@ def main():
     loader = make_loader(args.valid_dir, args.batch_size, args.workers)
 
     mb, knn = load_model_from_dir(args.model_dir)
-    pc = PatchCoreFromScratch()
+    pc = PatchCoreFromScratch().to(device)
     if mb is not None and knn is None:
-        # fit knn from memory bank
         from sklearn.neighbors import NearestNeighbors
+
         pc.memory_bank = mb
-        pc.knn = NearestNeighbors()
+        pc.n_neighbors = args.n_neighbors
+        pc.knn = NearestNeighbors(n_neighbors=pc.n_neighbors)
         pc.knn.fit(pc.memory_bank)
     elif knn is not None:
         pc.memory_bank = mb if mb is not None else None
         pc.knn = knn
+        pc.n_neighbors = getattr(knn, 'n_neighbors', args.n_neighbors)
     else:
         raise SystemExit('No memory_bank or knn found in model-dir')
 

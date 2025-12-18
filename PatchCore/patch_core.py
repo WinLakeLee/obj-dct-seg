@@ -1,188 +1,410 @@
 import logging
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+from sklearn.neighbors import NearestNeighbors
+from sklearn.random_projection import SparseRandomProjection
+import numpy as np
+from torchvision import transforms
+import json
+from pathlib import Path
+
+# ---------------------------------------------------------
+# 1. 성능 최적화: TF32 활성화 (Ampere GPU 이상에서 속도 향상)
+# ---------------------------------------------------------
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+# torchvision 최신 버전 호환
 try:
-    # newer torchvision: use Weights enum
     from torchvision.models import Wide_ResNet50_2_Weights
+
     _WIDE_RESNET_WEIGHTS = Wide_ResNet50_2_Weights.DEFAULT
 except Exception:
     _WIDE_RESNET_WEIGHTS = None
-from sklearn.neighbors import NearestNeighbors
-import numpy as np
+
+# FAISS 유무 확인
+try:
+    import faiss
+
+    HAS_FAISS = True
+except Exception:
+    HAS_FAISS = False
+
+# Triton availability (required for torch.compile -> inductor backend)
+try:
+    import triton  # noqa: F401
+
+    HAS_TRITON = True
+except Exception:
+    HAS_TRITON = False
 
 logger = logging.getLogger(__name__)
 
-class PatchCoreFromScratch:
-    def __init__(self):
-        # 1. 눈 (Backbone): 사전 학습된 Wide ResNet50 가져오기
-        # prefer modern weights API if available to avoid deprecation warnings
-        if _WIDE_RESNET_WEIGHTS is not None:
-            self.backbone = models.wide_resnet50_2(weights=_WIDE_RESNET_WEIGHTS)
+
+class PatchCoreOptimized:
+    def __init__(
+        self, backbone_name="wide_resnet50_2", sampling_ratio=0.01, use_fp16=True
+    ):
+        """
+        Args:
+            sampling_ratio (float): 메모리 뱅크 샘플링 비율.
+            use_fp16 (bool): True일 경우 FP16(반정밀도) 모드를 사용하여 속도 향상 및 메모리 절약.
+        """
+        self.sampling_ratio = sampling_ratio
+        self.use_fp16 = use_fp16 and torch.cuda.is_available()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # 1. Backbone 로드
+        if backbone_name == "wide_resnet50_2":
+            if _WIDE_RESNET_WEIGHTS is not None:
+                self.backbone = models.wide_resnet50_2(weights=_WIDE_RESNET_WEIGHTS)
+            else:
+                self.backbone = models.wide_resnet50_2(pretrained=True)
         else:
-            # fallback for older torchvision versions
-            self.backbone = models.wide_resnet50_2(pretrained=True)
-        self.backbone.eval() # 학습 안 함 (평가 모드)
-        
-        # 특징을 낚아챌 레이어 지정 (Layer 2, Layer 3)
+            self.backbone = models.resnet18(pretrained=True)
+
+        self.backbone.eval()
+        self.backbone.to(self.device)
+
+        # ---------------------------------------------------------
+        # 2. 성능 최적화: FP16 모드 (메모리 절반, 속도 증가)
+        # ---------------------------------------------------------
+        if self.use_fp16:
+            self.backbone.half()
+            logger.info("🚀 FP16(Half Precision) 모드가 활성화되었습니다.")
+
+        # ---------------------------------------------------------
+        # 3. 성능 최적화: torch.compile (PyTorch 2.x 이상, triton 필요)
+        # ---------------------------------------------------------
+        if hasattr(torch, "compile") and HAS_TRITON:
+            try:
+                self.backbone = torch.compile(self.backbone)
+                logger.info("🚀 PyTorch 2.0 Compilation이 적용되었습니다.")
+            except Exception as e:
+                logger.warning(f"Compilation 실패 (무시 가능): {e}")
+        else:
+            logger.info("torch.compile 건너뜀 (triton 없음 또는 환경 미지원)")
+
+        # 특징 추출을 위한 Hook 설정
         self.features = []
-        self.hooks = []
         self._register_hooks()
-        
-        self.memory_bank = [] # 기억 저장소
+
+        self.memory_bank = None
+        self.knn = None
+        self.faiss_index = None
+        self.n_neighbors = 9
+
+    def to(self, device):
+        """Move backbone and update internal device tracking."""
+        self.device = torch.device(device)
+        self.backbone.to(self.device)
+        return self
 
     def _hook_fn(self, module, input, output):
-        # 레이어를 통과할 때 데이터를 가로채는 함수
+        # FP16 모드일 경우 Hook 출력도 FP16일 수 있으므로 필요시 처리 가능
         self.features.append(output)
 
     def _register_hooks(self):
-        # ResNet의 layer2와 layer3 뒤에 도청 장치(Hook) 설치
         self.backbone.layer2.register_forward_hook(self._hook_fn)
         self.backbone.layer3.register_forward_hook(self._hook_fn)
 
     def extract_features(self, x):
-        """
-        이미지에서 Patch 단위의 특징 벡터들을 추출합니다.
-        Input: (Batch_Size, 3, H, W)
-        Output: (Total_Pixels, Feature_Dimension) -> KNN에 들어갈 벡터들
-        """
-        self.features = [] # Hook으로 채워질 리스트 초기화
+        """이미지 배치를 입력받아 (N_patches, Dim) 형태의 특징 벡터 반환"""
+        self.features = []
+
+        # 입력 데이터 장치 및 타입 변환
+        x = x.to(self.device)
+        if self.use_fp16:
+            x = x.half()
+
         with torch.no_grad():
             self.backbone(x)
-        
-        # 1. 특징 맵 가져오기 (Hook으로 낚아챈 것들)
-        # ResNet50 기준:
-        # features[0] (Layer2): [Batch, 512, 28, 28] -> 큼 (디테일)
-        # features[1] (Layer3): [Batch, 1024, 14, 14] -> 작음 (전체적 의미)
-        f2 = self.features[0] 
-        f3 = self.features[1] 
 
-        # 2. 크기 맞추기 (Upsampling)
-        # 작은 Layer3(f3)를 Layer2(f2)의 크기(28x28)로 강제로 늘립니다.
-        # mode='bilinear': 부드럽게 늘리기
-        f3_resized = F.interpolate(f3, size=f2.shape[-2:], mode='bilinear', align_corners=True)
+        # Feature Map 가져오기
+        f2 = self.features[0]
+        f3 = self.features[1]
 
-        # 3. 합치기 (Concatenation)
-        # 채널(dim=1) 방향으로 합칩니다.
-        # 결과: [Batch, 512 + 1024, 28, 28] = [Batch, 1536, 28, 28]
+        # Upsampling & Concatenation
+        # F.interpolate는 FP16에서 동작하지만, 안정성을 위해 float32로 변환해서 계산하는 경우도 있음.
+        # 여기서는 속도를 위해 그대로 진행하되 align_corners=True는 유지
+        f3_resized = F.interpolate(
+            f3, size=f2.shape[-2:], mode="bilinear", align_corners=True
+        )
         concat_features = torch.cat([f2, f3_resized], dim=1)
 
-        # 4. Patching (지역 정보 집계) - ⭐ 여기가 핵심!
-        # 픽셀 하나의 값만 쓰는 게 아니라, 3x3 주변 정보를 평균 내서 씁니다.
-        # 이렇게 하면 픽셀이 살짝 밀려도 비슷하게 인식합니다 (Robustness).
-        # AvgPool2d(kernel_size=3, stride=1, padding=1) -> 크기는 유지됨
-        patch_features = F.avg_pool2d(concat_features, kernel_size=3, stride=1, padding=1)
+        # Average Pooling (Smoothing)
+        patch_features = F.avg_pool2d(
+            concat_features, kernel_size=3, stride=1, padding=1
+        )
 
-        # 5. 모양 변경 (Flatten)
-        # KNN은 (N, Dimension) 형태의 2차원 표만 이해합니다.
-        # [Batch, Channel, H, W] -> [Batch, H, W, Channel]
+        # (Batch, C, H, W) -> (Batch, H, W, C) -> (N, C)
         patch_features = patch_features.permute(0, 2, 3, 1)
-        
-        # [Batch * H * W, Channel] 형태로 쫙 폅니다.
-        # 예: 이미지 1장(28x28=784픽셀) -> (784, 1536) 크기의 벡터 뭉치
         output_features = patch_features.reshape(-1, patch_features.shape[-1])
 
-        return output_features.cpu() # 메모리 절약을 위해 CPU로 보냄
-    
-    def fit(self, train_loader, checkpoint_dir=None, checkpoint_interval=100, n_neighbors=9):
-        """Build memory bank from training loader.
+        # 주의: Faiss(CPU)나 Sklearn은 float32만 받습니다.
+        # 따라서 반환 시에는 float32로 캐스팅하여 CPU로 보냅니다.
+        return output_features.float().cpu()
 
-        Args:
-            train_loader: iterable yielding batched image tensors
-            checkpoint_dir: optional directory to save partial/final checkpoints
-            checkpoint_interval: save partial features every N batches
-        """
-        logger.info("🧠 정상 패턴 기억 중...")
-        features_list = []
-        batch_count = 0
-
-        # store checkpoint params on the instance for other code if needed
-        self._checkpoint_dir = checkpoint_dir
-        self._checkpoint_interval = checkpoint_interval
-
-        for imgs in train_loader:
-            batch_count += 1
-            feats = self.extract_features(imgs)
-            feats_np = feats.cpu().numpy()
-            features_list.append(feats_np)
-
-            if checkpoint_dir and checkpoint_interval and (batch_count % checkpoint_interval == 0):
-                try:
-                    os.makedirs(checkpoint_dir, exist_ok=True)
-                    partial = np.concatenate(features_list)
-                    path = os.path.join(checkpoint_dir, f'partial_features_until_batch_{batch_count}.npy')
-                    np.save(path, partial)
-                    logger.info(f'Checkpoint: saved partial features to {path}')
-                except Exception as e:
-                    logger.warning(f'Failed to save checkpoint at batch {batch_count}: {e}')
-
-        # concat all features
-        if len(features_list) == 0:
-            self.memory_bank = np.zeros((0, 0))
+    @staticmethod
+    def get_train_transforms(
+        resize_size=256,
+        crop_size=224,
+        random_crop=False,
+        hflip=False,
+        rotation=0.0,
+        color_jitter=0.0,
+    ):
+        """PatchCore 학습용 데이터 증강 파이프라인."""
+        tfs = [transforms.Resize(resize_size)]
+        if random_crop:
+            tfs.append(transforms.RandomCrop(crop_size))
         else:
-            self.memory_bank = np.concatenate(features_list)
+            tfs.append(transforms.CenterCrop(crop_size))
+        if hflip:
+            tfs.append(transforms.RandomHorizontalFlip(p=0.5))
+        if rotation and rotation > 0:
+            tfs.append(transforms.RandomRotation(degrees=rotation))
+        if color_jitter and color_jitter > 0:
+            tfs.append(
+                transforms.ColorJitter(
+                    brightness=color_jitter,
+                    contrast=color_jitter,
+                    saturation=color_jitter / 2,
+                )
+            )
+        tfs.extend(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
+            ]
+        )
+        return transforms.Compose(tfs)
 
-        # fit knn
-        self.knn = NearestNeighbors(n_neighbors=n_neighbors)
-        self.knn.fit(self.memory_bank)
+    def predict_tta(self, img, score_type="max", kneighbors_batch=None):
+        """Test-Time Augmentation 기반 평균 점수 계산."""
+        augmented_imgs = [
+            img,
+            transforms.functional.hflip(img),
+            transforms.functional.rotate(img, angle=5),
+            transforms.functional.rotate(img, angle=-5),
+        ]
 
-        # final save
-        if checkpoint_dir:
-            try:
-                os.makedirs(checkpoint_dir, exist_ok=True)
-                mb_path = os.path.join(checkpoint_dir, 'memory_bank.npy')
-                np.save(mb_path, self.memory_bank)
-                logger.info(f'Saved final memory_bank to {mb_path}')
-                try:
-                    import joblib
-                    knn_path = os.path.join(checkpoint_dir, 'knn.pkl')
-                    joblib.dump(self.knn, knn_path)
-                    logger.info(f'Saved final KNN to {knn_path}')
-                except Exception:
-                    logger.warning('joblib not available, skipping knn save')
-            except Exception as e:
-                logger.warning(f'Failed to save final checkpoint: {e}')
+        scores_list = []
+        for aug_img in augmented_imgs:
+            score = self.predict(
+                aug_img, score_type=score_type, kneighbors_batch=kneighbors_batch
+            )
+            scores_list.append(score[0])
 
-    def predict(self, img, kneighbors_batch=4096):
-        """Compute anomaly score for `img`.
+        final_score = np.mean(scores_list)
+        return [final_score]
 
-        Accepts a single image tensor (3,H,W) or a batch tensor (B,3,H,W).
-        Returns a single score for single input or list of scores for batch.
-        `kneighbors_batch` controls how many query patches are passed to KNN at once.
+    def _compute_greedy_coreset_indices(
+        self, features: np.ndarray, sampling_ratio: float
+    ) -> np.ndarray:
         """
-        if not hasattr(self, 'knn'):
-            raise RuntimeError('KNN not fitted. Call fit() first.')
+        PatchCore의 핵심: K-Center Greedy 알고리즘
+        무작위가 아니라, 가장 유의미한(거리가 먼) 특징들을 골라냅니다.
+        """
+        sample_size = int(features.shape[0] * sampling_ratio)
+        if sample_size >= features.shape[0]:
+            return np.arange(features.shape[0])
 
-        single = False
+        logger.info(
+            f"🧠 Coreset Sampling 시작: {features.shape[0]} -> {sample_size} (정확도 향상 중...)"
+        )
+
+        # 1. 속도를 위해 Random Projection으로 차원 축소 (예: 1024 -> 128)
+        # 차원이 줄어도 점들 간의 거리 비율은 유지된다는 존슨-린덴슈트라우스 보조정리 활용
+        reducer = SparseRandomProjection(n_components="auto", eps=0.9)
+        reduced_features = reducer.fit_transform(features)
+
+        # 2. Greedy Selection
+        # 첫 번째 점은 무작위 선택
+        selector = [np.random.randint(features.shape[0])]
+        selected_indices = [selector[0]]
+
+        # 가장 가까운 중심점까지의 거리 저장
+        # 초기에는 첫 번째 선택된 점과의 거리로 초기화
+        dist_matrix = np.linalg.norm(
+            reduced_features - reduced_features[selector[0]], axis=1
+        )
+
+        for _ in range(1, sample_size):
+            # 현재 선택된 점들로부터 가장 '멀리' 있는 점을 다음 점으로 선택
+            # (가장 잘 대변되지 않은 영역을 커버하기 위해)
+            next_index = np.argmax(dist_matrix)
+
+            # 선택된 점 추가
+            selected_indices.append(next_index)
+
+            # 거리 갱신: 기존 거리 vs 새로 선택된 점과의 거리 중 더 작은 값 유지
+            new_dist = np.linalg.norm(
+                reduced_features - reduced_features[next_index], axis=1
+            )
+            dist_matrix = np.minimum(dist_matrix, new_dist)
+
+        return np.array(selected_indices)
+
+    def fit(
+        self,
+        train_loader,
+        n_neighbors=9,
+        checkpoint_dir=None,
+        checkpoint_interval=None,
+    ):
+        logger.info("🧠 학습 시작: 특징 추출 및 메모리 뱅크 구축...")
+        features_list = []
+
+        # 배치 단위 추출 (메모리 관리)
+        for step, imgs in enumerate(train_loader, start=1):
+            feats = self.extract_features(imgs)
+            features_list.append(feats.numpy())
+
+            if checkpoint_interval and step % checkpoint_interval == 0:
+                logger.info("Processed %d batches so far", step)
+
+        # 1. 전체 특징 합치기
+        full_bank = np.concatenate(features_list, axis=0)
+
+        # ---------------------------------------------------------
+        # [수정] 2. 성능 최적화: Random -> Coreset Sampling 변경
+        # ---------------------------------------------------------
+        if self.sampling_ratio < 1.0:
+            indices = self._compute_greedy_coreset_indices(
+                full_bank, self.sampling_ratio
+            )
+            self.memory_bank = full_bank[indices]
+        else:
+            self.memory_bank = full_bank
+
+        self.memory_bank = np.ascontiguousarray(self.memory_bank.astype(np.float32))
+        self.n_neighbors = n_neighbors
+        self._build_index()
+
+        if checkpoint_dir:
+            self._save_checkpoint(checkpoint_dir)
+
+    def _save_checkpoint(self, checkpoint_dir):
+        ckpt_dir = Path(checkpoint_dir)
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+        mb_path = ckpt_dir / "memory_bank.npy"
+        np.save(str(mb_path), self.memory_bank)
+
+        meta = {
+            "sampling_ratio": self.sampling_ratio,
+            "n_neighbors": self.n_neighbors,
+            "use_fp16": self.use_fp16,
+            "faiss": self.faiss_index is not None,
+        }
+        with open(ckpt_dir / "meta.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+
+        if self.knn is not None:
+            try:
+                import joblib
+
+                joblib.dump(self.knn, str(ckpt_dir / "knn.pkl"))
+            except Exception as e:
+                logger.warning("KNN 저장 실패 (무시 가능): %s", e)
+
+    def _build_index(self):
+        """KNN 또는 Faiss 인덱스 빌드"""
+        dim = self.memory_bank.shape[1]
+
+        if HAS_FAISS:
+            # ---------------------------------------------------------
+            # 4. 성능 최적화: FAISS IndexFactory 사용 (자동 최적화)
+            # ---------------------------------------------------------
+            # 데이터가 매우 많다면 'IVF1024,Flat' 등을 사용하여 근사 검색(속도↑) 가능
+            # 여기서는 정확도를 위해 FlatL2를 쓰되 GPU 자원을 활용
+            index_str = "Flat"
+
+            try:
+                # GPU 리소스 사용 시도
+                res = faiss.StandardGpuResources()
+                # 인덱스 생성
+                index = faiss.index_factory(dim, index_str, faiss.METRIC_L2)
+
+                # GPU로 이동 (메모리가 허용하는 경우)
+                if torch.cuda.is_available():
+                    index = faiss.index_cpu_to_gpu(res, 0, index)
+                    logger.info("🚀 FAISS: GPU 인덱싱 성공")
+
+                index.add(self.memory_bank)
+                self.faiss_index = index
+
+            except Exception as e:
+                logger.warning(f"FAISS GPU 설정 실패 ({e}). CPU 모드로 전환합니다.")
+                self.faiss_index = faiss.IndexFlatL2(dim)
+                self.faiss_index.add(self.memory_bank)
+        else:
+            logger.info("Faiss 없음: Scikit-Learn KNN 사용.")
+            self.knn = NearestNeighbors(n_neighbors=self.n_neighbors)
+            self.knn.fit(self.memory_bank)
+
+    def predict(self, img, score_type="max", kneighbors_batch=None):
+        # 배치 차원 추가
         if img.dim() == 3:
             img = img.unsqueeze(0)
-            single = True
 
-        # extract features for whole batch
-        test_feat_t = self.extract_features(img)
-        test_feat = test_feat_t.cpu().numpy()
+        # 특징 추출
+        test_feat = self.extract_features(img).numpy()
+        test_feat = np.ascontiguousarray(test_feat.astype(np.float32))
 
-        total = test_feat.shape[0]
-        B = img.shape[0]
-        if B == 0 or total == 0:
-            return [] if not single else 0.0
+        # 검색
+        if self.faiss_index is not None:
+            distances = []
+            if kneighbors_batch:
+                for start in range(0, test_feat.shape[0], kneighbors_batch):
+                    end = start + kneighbors_batch
+                    D, _ = self.faiss_index.search(
+                        test_feat[start:end], self.n_neighbors
+                    )
+                    distances.append(D)
+                D = np.concatenate(distances, axis=0)
+            else:
+                D, _ = self.faiss_index.search(test_feat, self.n_neighbors)
+            patch_scores = np.mean(D, axis=1)
+        elif self.knn is not None:
+            distances = []
+            if kneighbors_batch:
+                for start in range(0, test_feat.shape[0], kneighbors_batch):
+                    end = start + kneighbors_batch
+                    D, _ = self.knn.kneighbors(
+                        test_feat[start:end], n_neighbors=self.n_neighbors
+                    )
+                    distances.append(D)
+                D = np.concatenate(distances, axis=0)
+            else:
+                D, _ = self.knn.kneighbors(test_feat)
+            patch_scores = np.mean(D, axis=1)
+        else:
+            raise RuntimeError("모델 미학습 상태")
 
-        patches_per_img = total // B
+        # 배치별 점수 계산
+        patches_per_img = test_feat.shape[0] // img.shape[0]
+        batch_scores = []
 
-        # query KNN in chunks to save memory
-        distances_chunks = []
-        for start in range(0, total, kneighbors_batch):
-            end = min(total, start + kneighbors_batch)
-            dists, _ = self.knn.kneighbors(test_feat[start:end])
-            distances_chunks.append(dists)
+        for i in range(img.shape[0]):
+            start = i * patches_per_img
+            end = (i + 1) * patches_per_img
+            scores_in_img = patch_scores[start:end]
 
-        distances = np.vstack(distances_chunks)
+            if score_type == "max":
+                score = np.max(scores_in_img)
+            else:
+                score = np.mean(scores_in_img)
+            batch_scores.append(float(score))
 
-        scores = []
-        for i in range(B):
-            s = distances[i * patches_per_img:(i + 1) * patches_per_img].mean()
-            scores.append(float(s))
+        return batch_scores
 
-        return scores[0] if single else scores
+
+# Backward-compatible alias used by training script
+class PatchCoreFromScratch(PatchCoreOptimized):
+    pass

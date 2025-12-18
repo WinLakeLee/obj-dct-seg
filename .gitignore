@@ -397,7 +397,6 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
-
 # End of https://www.toptal.com/developers/gitignore/api/python,venv,dotenv,windows,flask,opencv,visualstudiocode
 
 # XML files
@@ -405,8 +404,23 @@ $RECYCLE.BIN/
 
 # numpy files
 .npy
+# Custom ignores for 404-ai project
 /outputs
 /data/archive
+
+# venv
 /.venv-deeplearning
+
+# MVTec Anomaly Detection Dataset
 /data/mvtec
+
 /images
+/data
+
+# PyTorch model files
+*.pt
+
+# Directories to ignore
+/Anomalib/classification
+/yolo_training/dataset
+/yolo_training/runs

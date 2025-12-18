@@ -1,0 +1,7 @@
+# Intel RealSense SDK for Python
+flask-mqtt
+paho-mqtt
+-r requirements-core.txt
+
+# Optional vision extras (see requirements-vision.txt)
+# To install vision extras in the same venv: python -m pip install -r requirements-vision.txt

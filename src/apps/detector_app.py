@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
-from mqtt_utils import publish_mqtt
+from src.utils.mqtt_utils import publish_mqtt
 
 app = FastAPI(title="Detector Service", version="1.0")
 
@@ -30,7 +30,10 @@ async def detect(image: UploadFile = File(...)):
     # YOLO via ultralytics
     try:
         from ultralytics import YOLO
-        yolo_w = os.environ.get('DETECTION_WEIGHTS', r'D:\project\404-ai\yolo_training\weights\base\yolo11m.pt')
+        yolo_w = os.environ.get(
+            'DETECTION_WEIGHTS',
+            os.path.join('src', 'models', 'yolo_training', 'weights', 'base', 'yolo11m.pt'),
+        )
         model = YOLO(yolo_w)
         preds = model.predict(img, imgsz=int(os.environ.get('YOLO_IMG_SIZE', 640)), verbose=False)
         r = preds[0]

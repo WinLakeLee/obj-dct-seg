@@ -424,3 +424,5 @@ $RECYCLE.BIN/
 /Anomalib/classification
 /yolo_training/dataset
 /yolo_training/runs
+/src/models/Anomalib/classification
+/src/models/yolo_training/runs

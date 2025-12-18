@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
-from mqtt_utils import publish_mqtt
+from src.utils.mqtt_utils import publish_mqtt
 
 app = FastAPI(title="Inference Service", version="1.0")
 

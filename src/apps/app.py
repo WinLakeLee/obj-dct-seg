@@ -6,11 +6,11 @@ Inference service: inference_app.py (GAN reconstruction + PatchCore)
 
 import os
 import json
-import config
+from configs import config
 import requests
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request
-from mqtt_utils import (
+from src.utils.mqtt_utils import (
     create_paho_client,
     publish_with_client,
     publish_mqtt,
@@ -20,7 +20,7 @@ import threading
 from datetime import datetime
 import time
 from dotenv import load_dotenv
-from yolo_training.detect_anomaly_pipeline import ScratchDetectionPipeline
+from src.models.yolo_training.detect_anomaly_pipeline import ScratchDetectionPipeline
 import tempfile
 import cv2
 import numpy as np
@@ -200,7 +200,10 @@ print("🚀 Scratch Detection Pipeline 초기화 중...")
 try:
     _SCRATCH_PIPELINE = ScratchDetectionPipeline(
         yolo_model_path=os.environ.get(
-            "YOLO_MODEL_PATH", "yolo_training/runs/seg_toycar3/weights/last.pt"
+            "YOLO_MODEL_PATH",
+            os.path.join(
+                "src", "models", "yolo_training", "runs", "seg_toycar3", "weights", "last.pt"
+            ),
         ),
         patchcore_checkpoint=os.environ.get(
             "PATCHCORE_CHECKPOINT", "models/patchcore_scratch"

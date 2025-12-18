@@ -1,12 +1,8 @@
-# 404-AI
-
-Factory defect detection system with AI-powered computer vision.
-
 ## Installation
 
 # 404-AI
 
-한국어 정리: 공장 불량 검출을 위한 AI 기반 컴퓨터 비전 시스템
+공장 불량 검출을 위한 AI 기반 컴퓨터 비전 시스템
 
 요약
 - `404-AI`는 Intel RealSense 카메라와 딥러닝 모델을 활용하여 공정 중 발생하는 불량을 실시간으로 감지하는 프로젝트입니다.

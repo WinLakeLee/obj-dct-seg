@@ -1,0 +1,6 @@
+train: D:/project/obj-dct-seg/data/neu_metal/train/images
+val: D:/project/obj-dct-seg/data/neu_metal/valid/images
+test: D:/project/obj-dct-seg/data/neu_metal/test/images
+
+nc: 7
+names: ['objects', 'car', 'car_broken_area', 'car_floor', 'car_housing', 'car_scratch', 'car_separated']

@@ -1,0 +1,10 @@
+# Core dependencies
+flask-mqtt
+paho-mqtt
+
+# Vision & AI dependencies
+ultralytics
+anomalib
+opencv-python
+torch
+torchvision

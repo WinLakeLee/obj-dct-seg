@@ -6,5 +6,4 @@ paho-mqtt
 ultralytics
 anomalib
 opencv-python
-torch
 torchvision

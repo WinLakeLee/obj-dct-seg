@@ -24,7 +24,7 @@ class UnifiedPipeline:
     def __init__(
         self, yolo_path, anomaly_model_path, anomaly_config_path=None, device="cuda"
     ):
-        self.device = device if torch.cuda.is_available() else "cpu"
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # 1. Load YOLO
         print(f"📦 Loading YOLO from {yolo_path}")
@@ -35,13 +35,11 @@ class UnifiedPipeline:
             raise ImportError("anomalib.deploy.TorchInferencer is required.")
 
         print(f"🧠 Loading Anomaly Model from {anomaly_model_path}")
-        # TorchInferencer automatically handles device if possible, or checks config
-        # config_path is needed if model_path is just weights and not a full export
         self.anomaly_inferencer = TorchInferencer(
             path=anomaly_model_path, config=anomaly_config_path, device=self.device
         )
 
-        # Define car classes (based on prev data.yaml)
+        # Define car classes
         self.car_class_ids = [1, 2, 3, 4, 5, 6]
         self.class_names = {
             1: "car",
@@ -81,33 +79,35 @@ class UnifiedPipeline:
             bbox = det["bbox"]
             x1, y1, x2, y2 = bbox
 
-            # Crop
+            # Clamp bbox
+            h, w = image.shape[:2]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+
             crop = image[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
 
-            # Anomalib Inference
-            # Inferencer expects RGB numpy array or path.
+            # A. Visual Anomaly (Anomalib)
             crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-
-            # predict returns an ImageResult object
             anomaly_result = self.anomaly_inferencer.predict(crop_rgb)
-
-            # Extract score and map (if available)
-            score = anomaly_result.pred_score
-            label = anomaly_result.pred_label
-
-            is_anomaly = (
-                float(score) > 0.5
-            )  # Default threshold if not in result, or check label
+            visual_score = anomaly_result.pred_score
+            is_anomaly = float(visual_score) > 0.5
 
             # Draw
             color = (0, 0, 255) if is_anomaly else (0, 255, 0)
             cv2.rectangle(result_image, (x1, y1), (x2, y2), color, 2)
 
-            txt = f"{self.class_names.get(det['cls'], 'obj')} | Anom: {score:.2f}"
+            label_text = self.class_names.get(det["cls"], "obj")
+            info_text = f"{label_text} | Anom: {visual_score:.2f}"
             cv2.putText(
-                result_image, txt, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2
+                result_image,
+                info_text,
+                (x1, y1 - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                2,
             )
 
             if is_anomaly:
@@ -122,14 +122,12 @@ class UnifiedPipeline:
 
 def main():
     parser = argparse.ArgumentParser(description="Unified YOLO + Anomalib Pipeline")
-    parser.add_argument("--image", required=True)
+    parser.add_argument("--image", required=True, help="Path to input image")
     parser.add_argument("--yolo", default="yolo11m.pt")
     parser.add_argument(
-        "--anomaly-weights", required=True, help="Path to Anomalib model weights/ckpt"
+        "--anomaly-weights", required=True, help="Path to Anomalib model weights"
     )
-    parser.add_argument(
-        "--anomaly-config", help="Path to Anomalib config (yaml), if needed"
-    )
+    parser.add_argument("--anomaly-config", help="Path to Anomalib config (yaml)")
     parser.add_argument("--output", default="output.jpg")
 
     args = parser.parse_args()
@@ -140,7 +138,10 @@ def main():
         anomaly_config_path=args.anomaly_config,
     )
 
-    pipeline.process_image(args.image, args.output)
+    try:
+        pipeline.process_image(args.image, args.output)
+    except Exception as e:
+        print(f"❌ Error: {e}")
 
 
 if __name__ == "__main__":

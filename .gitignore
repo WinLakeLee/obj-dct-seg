@@ -398,3 +398,6 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/python,venv,dotenv,windows,flask,opencv,visualstudiocode
+/data
+/outputs
+/src/models

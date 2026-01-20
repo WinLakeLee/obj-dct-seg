@@ -1,118 +1,129 @@
-# 404-AI
+# 404-AI: 불량 탐지 시스템 (Defect Detection System)
 
-Factory defect detection system with AI-powered computer vision.
+**YOLO와 Anomalib을 활용한 AI 기반 실시간 공장 불량 탐지 시스템**
 
-## Features
+## 개요 (Overview)
 
-- **AI-Powered Defect Detection**: Automated detection of manufacturing defects using advanced computer vision algorithms
-- **Intel RealSense Camera Support**: Integration with Intel RealSense depth cameras for enhanced 3D defect detection and analysis
-- **Real-time Processing**: Process video streams in real-time for immediate defect identification
-- **Flexible Configuration**: Easy-to-configure system for different manufacturing environments
+`404-AI`는 딥러닝과 컴퓨터 비전 기술을 활용하여 제조 공정 중 발생하는 불량을 실시간으로 감지하는 프로젝트입니다.  
+**YOLO (Ultralytics)** 를 사용하여 불량 검사 대상 영역(ROI)을 탐지하고, **Anomalib (PatchCore)** 알고리즘을 통해 미세한 스크래치나 파손 같은 이상 징후를 판별합니다. 또한 **Intel RealSense** 카메라와 연동하여 깊이(Depth) 정보 기반의 분석 확장성을 제공합니다.
 
-## Dependencies
-- **Flask**: Web framework for building REST APIs
-- **OpenCV**: Computer vision and image processing
-- **TensorFlow**: Deep learning framework
-- **Ultralytics**: YOLO models for object detection
-- **SAM3**: Segment Anything Model for image segmentation
+## 주요 기능 (Key Features)
 
-### Hardware
-- Intel RealSense Camera (D400 series recommended for depth sensing capabilities)
+- **AI 기반 불량 검출**: YOLO로 부품 위치를 찾고, Anomalib으로 정밀하게 불량 여부를 판단하는 통합 파이프라인 제공.
+- **실시간 영상 처리**: 카메라 스트림을 실시간으로 분석하여 즉각적인 불량 식별 가능.
+- **Intel RealSense 지원**: RGB 및 Depth 데이터를 활용한 고도화된 분석 환경 지원.
+- **웹 API 통합**: Flask 기반의 REST API 구조를 통해 외부 시스템과 연동 용이.
+- **간편한 학습**: 사용자 데이터셋을 이용해 YOLO 및 이상 탐지 모델을 쉽게 재학습할 수 있는 스크립트 포함.
 
-### Software
-- Python 3.7+
-- pyrealsense2 - Intel RealSense SDK for Python
-- OpenCV - Image processing and computer vision
-- NumPy - Numerical computing
+## 프로젝트 구조 (Project Structure)
 
-## Installation
-
-# 404-ai
-공장 불량인식 (Factory Defect Recognition System)
-
-## Overview
-AI-powered system for detecting defects in factory production using computer vision and deep learning.
-
-## Features
-- Flask web framework for REST API
-- OpenCV for image processing
-- TensorFlow for deep learning models
-- Ultralytics YOLO for object detection
-- SAM2 (Segment Anything Model) for segmentation
-
-## Installation
-
-# 404-AI
-
-한국어 정리: 공장 불량 검출을 위한 AI 기반 컴퓨터 비전 시스템
-
-요약
-- `404-AI`는 Intel RealSense 카메라와 딥러닝 모델을 활용하여 공정 중 발생하는 불량을 실시간으로 감지하는 프로젝트입니다.
-
-주요 기능
-- AI 기반 불량 검출 (TensorFlow / Ultralytics 등)
-- Intel RealSense 카메라 연동(RGB + Depth)
-- 실시간 영상 처리 파이프라인
-- Flask 기반 간단한 REST API (`/`, `/health`)
-
-필수 조건
-- Python 3.8 또는 3.10 권장 (프로젝트에서 TensorFlow 2.10 호환을 위해 3.10 권장)
-- pip
-- Intel RealSense 하드웨어(선택)
-
-설치 (Windows 권장 예시)
-1. 저장소 클론
-```powershell
-git clone https://github.com/WinLakeLee/404-ai.git
-cd 404-ai
 ```
-2. Python 3.10 가상환경 생성 및 활성화
-```powershell
-py -3.10 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-3. pip 도구 업그레이드 및 의존성 설치
-```powershell
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt
+404-ai/
+├── src/
+│   ├── pipeline/            # 추론(Inference) 실행 모듈
+│   │   └── run_pipeline.py  # 메인 파이프라인 (YOLO + Anomalib 통합)
+│   ├── training/            # 학습(Training) 스크립트
+│   │   ├── train_yolo.py    # YOLO 객체 인식 모델 학습
+│   │   ├── train_anomaly_patchcore.py # PatchCore 이상 탐지 모델 학습
+│   │   ├── train_anomaly_gan.py       # GAN 기반 이상 탐지 모델 학습 (옵션)
+│   │   └── data.yaml        # YOLO 데이터셋 설정 파일
+│   └── models/              # 유틸리티 및 보조 모듈
+├── data/
+│   └── neu_metal/           # 데이터셋 저장소 (MVTec 포맷 호환)
+├── outputs/                 # 학습 결과물 (모델 가중치, 로그 등)
+└── requirements.txt         # 프로젝트 의존성 목록
 ```
 
-사용법
-- 애플리케이션 실행
+## 시스템 요구사항 (Prerequisites)
+
+### 하드웨어
+- **CPU**: 최신 멀티코어 프로세서 권장
+- **GPU**: NVIDIA GPU (CUDA 지원) 권장 (모델 학습 및 빠른 추론을 위해 필요)
+- **Camera**: Intel RealSense D400 시리즈 (선택 사항)
+
+### 소프트웨어
+- **OS**: Windows 10/11 또는 Linux
+- **Python**: 3.8 ~ 3.10 (3.10 권장)
+- **CUDA**: 사용 가능한 GPU에 맞는 버전 설치
+
+## 주요 라이브러리 (Dependencies)
+- **Flask**: REST API 서버 구축
+- **OpenCV**: 이미지 처리 및 컴퓨터 비전
+- **Torch & Torchvision**: 딥러닝 프레임워크
+- **Ultralytics**: YOLO 객체 탐지 모델
+- **Anomalib**: 이상 탐지(Anomaly Detection) 라이브러리
+
+## 설치 방법 (Installation)
+
+1. **저장소 복제 (Clone Repository)**
+   ```powershell
+   git clone https://github.com/WinLakeLee/404-ai.git
+   cd 404-ai
+   ```
+
+2. **의존성 패키지 설치**
+   ```powershell
+   pip install -r requirements.txt
+   ```
+   *참고: GPU 사용 시, 본인의 CUDA 버전에 맞는 PyTorch를 미리 설치하는 것을 권장합니다.*
+
+## 사용법 (Usage)
+
+### 1. 모델 학습 (Training)
+
+**YOLO 학습 (객체 위치 탐지)**
 ```powershell
-python app.py
+python src/training/train_yolo.py --epochs 50 --batch 16
 ```
-- 예제(RealSense 테스트)
+- 결과물은 `outputs/yolo_training` 폴더에 저장됩니다.
+
+**Anomalib 학습 (이상 탐지 - PatchCore)**
 ```powershell
-python example.py
+python src/training/train_anomaly_patchcore.py
+```
+- 정상 이미지(`data/neu_metal/train/good`)를 학습하여 비정상 패턴을 감지합니다.
+- 결과물(모델 가중치 .ckpt 등)은 `outputs/anomalib_patchcore` 폴더에 저장됩니다.
+
+### 2. 추론 및 테스트 (Inference)
+
+통합 파이프라인을 실행하여 단일 이미지에서 객체와 불량을 동시에 검출합니다.
+
+```powershell
+python src/pipeline/run_pipeline.py ^
+    --image "test_image.jpg" ^
+    --yolo "yolo11m.pt" ^
+    --anomaly-weights "outputs/anomalib_patchcore/weights/model.ckpt"
 ```
 
-API
-- `GET /` — 환영 메시지
-- `GET /health` — 의존성 및 상태 확인
+**실행 옵션:**
+- `--image`: 분석할 이미지 경로
+- `--yolo`: 학습된 YOLO 모델 경로 (또는 `yolo11m.pt` 등 기본 모델)
+- `--anomaly-weights`: 학습된 Anomalib 모델 가중치 경로
+- `--output`: 결과 이미지가 저장될 경로 (기본값: `output.jpg`)
 
-구성
-- 주요 설정은 `config.py`에서 관리됩니다. (카메라 해상도, fps, 녹화 경로 등)
+## 데이터셋 구조 (Dataset)
 
-종속성(주요)
-- Flask
-- OpenCV
-- NumPy
-- TensorFlow
-- Ultralytics (YOLO)
-- pyrealsense2 (RealSense 연동, 하드웨어 필요)
+기본적으로 **Anomalib(MVTec 형식)** 과 **YOLO** 포맷을 따릅니다.
 
-개발
-- 주요 파일
-   - `app.py` — Flask 앱
-   - `example.py` — RealSense 샘플
-   - `config.py` — 설정
-   - `requirements.txt` — 의존성
+기본 경로: `data/neu_metal/`
+- `train/good`: 이상 탐지 학습용 **정상** 이미지
+- `test/scratch`: 테스트용 **불량** 이미지
+- `train/images` & `train/labels`: YOLO 학습을 위한 이미지 및 라벨
 
-라이선스
-- 자세한 내용은 `LICENSE` 파일을 확인하세요.
+## 라이선스 (License)
 
-기타
-- TensorFlow GPU 환경을 사용하려면 시스템의 CUDA/cuDNN 버전과 TensorFlow 버전 호환을 반드시 확인하세요.
-- 필요하시면 README에 설치 스크립트 또는 Dockerfile을 추가해 드립니다.
+이 프로젝트는 **AGPL-3.0** 라이선스를 따릅니다. (Ultralytics YOLO 라이선스 정책 준수)
+
+### 오픈소스 라이선스 고지 (Open Source License Notice)
+본 프로젝트는 다음의 오픈소스 라이브러리를 포함하거나 사용하고 있습니다.
+
+| 라이브러리 (Library) | 라이선스 (License) | 비고 |
+|---|---|---|
+| **Ultralytics (YOLO)** | **AGPL-3.0** | 상용 이용 시 별도 라이선스 필요 가능 |
+| **Anomalib** | Apache 2.0 | |
+| **OpenCV-Python** | MIT / Apache 2.0 | |
+| **Flask** | BSD-3-Clause | |
+| **Intel RealSense SDK**| Apache 2.0 | |
+
+> **주의**: Ultralytics YOLO(AGPL-3.0)를 사용하므로, 이 프로젝트를 배포할 경우 소스 코드를 공개해야 할 의무가 발생할 수 있습니다 (AGPL 규정). 기업용(미공개)으로 사용하시려면 Ultralytics의 Enterprise License를 확인하세요.
 

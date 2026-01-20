@@ -12,7 +12,7 @@ Factory defect detection system with AI-powered computer vision.
 ## Dependencies
 - **Flask**: Web framework for building REST APIs
 - **OpenCV**: Computer vision and image processing
-- **TensorFlow**: Deep learning framework
+- **TensorFlsow**: Deep learning framework
 - **Ultralytics**: YOLO models for object detection
 - **SAM3**: Segment Anything Model for image segmentation
 

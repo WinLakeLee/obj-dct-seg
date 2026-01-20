@@ -1,13 +1,10 @@
-# Intel RealSense SDK for Python
-pyrealsense2>=2.50.0
+# Core dependencies
+flask-mqtt
+paho-mqtt
 
-# Computer Vision and Image Processing
-opencv-python>=4.5.0
-numpy>=1.19.0
-
-# Additional dependencies for AI/ML capabilities
-pillow>=8.0.0
-flask
-tensorflow-gpu==2.10.0
+# Vision & AI dependencies
 ultralytics
-sam3
+anomalib
+opencv-python
+torch
+torchvision

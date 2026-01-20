@@ -1,10 +1,10 @@
-# 404-AI: 불량 탐지 시스템 (Defect Detection System)
+# obj-dct-seg: 불량 탐지 시스템 (Defect Detection System)
 
 **YOLO와 Anomalib을 활용한 AI 기반 실시간 공장 불량 탐지 시스템**
 
 ## 개요 (Overview)
 
-`404-AI`는 딥러닝과 컴퓨터 비전 기술을 활용하여 제조 공정 중 발생하는 불량을 실시간으로 감지하는 프로젝트입니다.  
+`obj-dct-seg`는 딥러닝과 컴퓨터 비전 기술을 활용하여 제조 공정 중 발생하는 불량을 실시간으로 감지하는 프로젝트입니다.  
 **YOLO (Ultralytics)** 를 사용하여 불량 검사 대상 영역(ROI)을 탐지하고, **Anomalib (PatchCore)** 알고리즘을 통해 미세한 스크래치나 파손 같은 이상 징후를 판별합니다. 또한 **Intel RealSense** 카메라와 연동하여 깊이(Depth) 정보 기반의 분석 확장성을 제공합니다.
 
 ## 주요 기능 (Key Features)

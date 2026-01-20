@@ -23,11 +23,6 @@ This product includes software derived from the following open source projects:
    Licensed under the BSD 3-Clause License.
    https://github.com/pallets/flask
 
-5. Intel RealSense SDK 2.0 (Python Wrapper)
-   Copyright (c) Intel Corporation
-   Licensed under the Apache License, Version 2.0.
-   https://github.com/IntelRealSense/librealsense
-
 -------------------------------------------------------------------
 
 Apache License

@@ -11,7 +11,6 @@
 
 - **AI 기반 불량 검출**: YOLO로 부품 위치를 찾고, Anomalib으로 정밀하게 불량 여부를 판단하는 통합 파이프라인 제공.
 - **실시간 영상 처리**: 카메라 스트림을 실시간으로 분석하여 즉각적인 불량 식별 가능.
-- **Intel RealSense 지원**: RGB 및 Depth 데이터를 활용한 고도화된 분석 환경 지원.
 - **웹 API 통합**: Flask 기반의 REST API 구조를 통해 외부 시스템과 연동 용이.
 - **간편한 학습**: 사용자 데이터셋을 이용해 YOLO 및 이상 탐지 모델을 쉽게 재학습할 수 있는 스크립트 포함.
 
@@ -39,7 +38,6 @@
 ### 하드웨어
 - **CPU**: 최신 멀티코어 프로세서 권장
 - **GPU**: NVIDIA GPU (CUDA 지원) 권장 (모델 학습 및 빠른 추론을 위해 필요)
-- **Camera**: Intel RealSense D400 시리즈 (선택 사항)
 
 ### 소프트웨어
 - **OS**: Windows 10/11 또는 Linux
@@ -123,7 +121,6 @@ python src/pipeline/run_pipeline.py ^
 | **Anomalib** | Apache 2.0 | |
 | **OpenCV-Python** | MIT / Apache 2.0 | |
 | **Flask** | BSD-3-Clause | |
-| **Intel RealSense SDK**| Apache 2.0 | |
 
 > **주의**: Ultralytics YOLO(AGPL-3.0)를 사용하므로, 이 프로젝트를 배포할 경우 소스 코드를 공개해야 할 의무가 발생할 수 있습니다 (AGPL 규정). 기업용(미공개)으로 사용하시려면 Ultralytics의 Enterprise License를 확인하세요.
 

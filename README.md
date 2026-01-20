@@ -1,8 +1,19 @@
-# 404-AI
+# 404-AI: Defect Detection System
 
-Factory defect detection system with AI-powered computer vision.
+**AI-based computer vision system for real-time defect detection using YOLO and Anomalib.**
 
-## Features
+## Overview
+
+`404-AI` utilizes deep learning to detect manufacturing defects. The system integrates **YOLO** for object localization and **Anomalib (PatchCore/FastFlow)** for unsupervised anomaly detection, providing a robust solution for detecting scratches, breaks, and other irregularities.
+
+## Key Features
+
+- **Object Detection**: Locates regions of interest (ROI) using YOLO (Ultralytics).
+- **Anomaly Detection**: Identifies subtle defects within ROIs using state-of-the-art anomaly detection algorithms (PatchCore).
+- **Unified Pipeline**: Seamless integration of detection and anomaly scoring in a single inference script.
+- **Easy Training**: Simplified scripts for training both YOLO and Anomaly models on custom datasets.
+
+## Project Structure
 
 - **AI-Powered Defect Detection**: Automated detection of manufacturing defects using advanced computer vision algorithms
 - **Intel RealSense Camera Support**: Integration with Intel RealSense depth cameras for enhanced 3D defect detection and analysis
@@ -66,53 +77,85 @@ AI-powered system for detecting defects in factory production using computer vis
 git clone https://github.com/WinLakeLee/404-ai.git
 cd 404-ai
 ```
-2. Python 3.10 가상환경 생성 및 활성화
-```powershell
-py -3.10 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-3. pip 도구 업그레이드 및 의존성 설치
-```powershell
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r requirements.txt
-```
-
-사용법
-- 애플리케이션 실행
-```powershell
-python app.py
-```
-- 예제(RealSense 테스트)
-```powershell
-python example.py
+404-ai/
+├── src/
+│   ├── pipeline/            # Inference execution
+│   │   └── run_pipeline.py  # Main pipeline script (YOLO + Anomalib)
+│   ├── training/            # Training modules
+│   │   ├── train_yolo.py    # YOLO training script
+│   │   ├── train_anomaly_patchcore.py # PatchCore training script
+│   │   ├── train_anomaly_gan.py       # GAN training script
+│   │   └── data.yaml        # Dataset configuration
+│   └── models/              # Legacy/Utility modules
+│       └── yolo/            # Helpers for YOLO
+├── data/
+│   └── neu_metal/           # Dataset directory
+├── outputs/                 # Training artifacts (weights, logs)
+└── requirements.txt         # Project dependencies
 ```
 
-API
-- `GET /` — 환영 메시지
-- `GET /health` — 의존성 및 상태 확인
+## Prerequisites
 
-구성
-- 주요 설정은 `config.py`에서 관리됩니다. (카메라 해상도, fps, 녹화 경로 등)
+- **Python**: 3.10+ (Recommended)
+- **CUDA**: Recommended for GPU acceleration.
 
-종속성(주요)
-- Flask
-- OpenCV
-- NumPy
-- TensorFlow
-- Ultralytics (YOLO)
-- pyrealsense2 (RealSense 연동, 하드웨어 필요)
+## Installation
 
-개발
-- 주요 파일
-   - `app.py` — Flask 앱
-   - `example.py` — RealSense 샘플
-   - `config.py` — 설정
-   - `requirements.txt` — 의존성
+1. **Clone the repository**
+   ```powershell
+   git clone https://github.com/WinLakeLee/404-ai.git
+   cd 404-ai
+   ```
 
-라이선스
-- 자세한 내용은 `LICENSE` 파일을 확인하세요.
+2. **Install Dependencies**
+   ```powershell
+   pip install -r requirements.txt
+   ```
+   *Note: Ensure you have `torch` installed with CUDA support if available.*
 
-기타
-- TensorFlow GPU 환경을 사용하려면 시스템의 CUDA/cuDNN 버전과 TensorFlow 버전 호환을 반드시 확인하세요.
-- 필요하시면 README에 설치 스크립트 또는 Dockerfile을 추가해 드립니다.
+## Usage
 
+### 1. Training
+
+**Train YOLO (Object Detection)**
+```powershell
+python src/training/train_yolo.py --epochs 50 --batch 16
+```
+- Results (weights) will be saved to `outputs/yolo_training`.
+
+**Train Anomaly Model (PatchCore)**
+```powershell
+python src/training/train_anomaly_patchcore.py
+```
+- The model learns "normal" appearance from `data/neu_metal/train/good`.
+- Results (weights) will be saved to `outputs/anomalib_patchcore`.
+
+### 2. Inference (Testing)
+
+Run the unified pipeline to detect objects and anomalies on a single image.
+
+```powershell
+python src/pipeline/run_pipeline.py ^
+    --image "path/to/your/test_image.jpg" ^
+    --yolo "yolo11m.pt" ^
+    --anomaly-weights "outputs/anomalib_patchcore/weights/model.ckpt"
+```
+
+**Arguments:**
+- `--image`: Path to input image.
+- `--yolo`: Path to trained YOLO weights (or base model like `yolo11m.pt`).
+- `--anomaly-weights`: Path to trained Anomalib model weights (`.ckpt` or `.pt`).
+- `--output`: Path to save the result image (default: `output.jpg`).
+
+## Dataset
+
+The project expects a dataset structure compatible with **MVTec AD** or **Folder** format for Anomalib, and **YOLO** format for detection.
+
+Default location: `data/neu_metal/`
+- `train/good`: Normal images for anomaly training.
+- `test/scratch`: Defect images for testing.
+- `train/images` & `train/labels`: For YOLO training.
+
+## License
+
+This project is licensed under the MIT License.
